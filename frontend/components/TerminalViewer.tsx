@@ -10,7 +10,6 @@ interface TerminalViewerProps {
 export default function TerminalViewer({ logs: initialLogs = [], bugId }: TerminalViewerProps) {
     const [logs, setLogs] = React.useState<string[]>(initialLogs);
     const scrollRef = useRef<HTMLDivElement>(null);
-    const wsRef = useRef<WebSocket | null>(null);
 
     // Auto-scroll to bottom when logs change
     useEffect(() => {
@@ -23,8 +22,9 @@ export default function TerminalViewer({ logs: initialLogs = [], bugId }: Termin
     useEffect(() => {
         if (!bugId) return;
 
-        const ws = new WebSocket(`ws://localhost:8000/ws/logs/${bugId}`);
-        wsRef.current = ws;
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.hostname === 'localhost' ? 'localhost:8000' : window.location.host;
+        const ws = new WebSocket(`${protocol}//${host}/ws/logs/${bugId}`);
 
         ws.onopen = () => {
             setLogs(prev => [...prev, `[SYSTEM] Connected to log stream for bug: ${bugId}`]);
@@ -43,9 +43,7 @@ export default function TerminalViewer({ logs: initialLogs = [], bugId }: Termin
         };
 
         return () => {
-            if (wsRef.current) {
-                wsRef.current.close();
-            }
+            ws.close();
         };
     }, [bugId]);
 
