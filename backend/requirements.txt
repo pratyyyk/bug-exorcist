@@ -15,3 +15,6 @@ docker
 
 # Database
 sqlalchemy
+
+# Version Control
+GitPython

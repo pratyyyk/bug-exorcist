@@ -12,3 +12,7 @@ env/
 
 # System
 .DS_Store
+
+# Backend Vendored
+/backend/Lib/
+/backend/Scripts/
