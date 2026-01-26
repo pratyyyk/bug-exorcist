@@ -2,6 +2,7 @@
 fastapi
 uvicorn[standard]
 pydantic
+websockets  # NEW: Required for WebSocket support
 
 # AI & LLM - Updated for LangChain v0.1+
 langchain
