@@ -23,6 +23,9 @@ class DockerSandboxManager:
         Changes for Security:
         - read_only=True: Root filesystem is immutable (prevents persistence/rootkits).
         - tmpfs: Writable temporary directory limited to 64MB (prevents disk fill attacks).
+        - user="nobody": Run as non-privileged user.
+        - cap_drop=["ALL"]: Drop all capabilities.
+        - security_opt=["no-new-privileges"]: Prevent privilege escalation.
         """
         container_name = f"sandbox_{uuid.uuid4().hex}"
         try:
@@ -37,7 +40,10 @@ class DockerSandboxManager:
                 pids_limit=10,                # Prevent fork bombs
                 cpu_quota=50000,              # Limit CPU usage (50%)
                 read_only=True,               # [Security] Make root FS read-only
-                tmpfs={'/tmp': 'size=64m'}    # [Security] Limited writeable space
+                tmpfs={'/tmp': 'size=64m'},   # [Security] Limited writeable space
+                user="nobody",                # [Security] Run as non-root user
+                cap_drop=["ALL"],             # [Security] Drop all root capabilities
+                security_opt=["no-new-privileges"] # [Security] Prevent privilege escalation
             )
             return container.id
         except Exception as e:
