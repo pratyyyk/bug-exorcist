@@ -11,26 +11,41 @@ def get_bug_reports(db: Session, skip: int = 0, limit: int = 100):
     return db.query(models.BugReport).offset(skip).limit(limit).all()
 
 def create_bug_report(db: Session, description: str):
-    db_bug_report = models.BugReport(description=description)
-    db.add(db_bug_report)
-    db.commit()
-    db.refresh(db_bug_report)
-    return db_bug_report
+    try:
+        db_bug_report = models.BugReport(description=description)
+        db.add(db_bug_report)
+        db.commit()
+        db.refresh(db_bug_report)
+        return db_bug_report
+    except Exception as e:
+        logger.error(f"Error creating bug report: {e}")
+        db.rollback()
+        raise
 
 def update_bug_report_status(db: Session, bug_report_id: int, status: str):
     db_bug_report = db.query(models.BugReport).filter(models.BugReport.id == bug_report_id).first()
     if db_bug_report:
-        db_bug_report.status = status
-        db.commit()
-        db.refresh(db_bug_report)
+        try:
+            db_bug_report.status = status
+            db.commit()
+            db.refresh(db_bug_report)
+        except Exception as e:
+            logger.error(f"Error updating bug report status for {bug_report_id}: {e}")
+            db.rollback()
+            return None
     return db_bug_report
 
 def create_session(db: Session, session_id: str, bug_report_id: int):
-    db_session = models.Session(id=session_id, bug_report_id=bug_report_id)
-    db.add(db_session)
-    db.commit()
-    db.refresh(db_session)
-    return db_session
+    try:
+        db_session = models.Session(id=session_id, bug_report_id=bug_report_id)
+        db.add(db_session)
+        db.commit()
+        db.refresh(db_session)
+        return db_session
+    except Exception as e:
+        logger.error(f"Error creating session {session_id}: {e}")
+        db.rollback()
+        return None
 
 def get_session(db: Session, session_id: str):
     return db.query(models.Session).filter(models.Session.id == session_id).first()

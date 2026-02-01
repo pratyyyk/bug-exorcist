@@ -104,39 +104,8 @@ def get_db():
 async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)):
     """
     Analyze a bug and generate a fix using GPT-4o.
-    
-    This endpoint now supports automatic retry logic:
-    - If use_retry=True (default), will automatically retry up to max_attempts times
-    - Each retry learns from previous failures
-    - Returns the first successful fix
-    
-    This endpoint:
-    1. Creates a bug report in the database
-    2. Analyzes the error using the Bug Exorcist agent
-    3. Verifies the fix in sandbox
-    4. Retries automatically if verification fails (up to max_attempts)
-    5. Returns the working fix or details of all attempts
-    
-    Args:
-        request: Bug analysis request with error details
-        db: Database session
-        
-    Returns:
-        Analysis results with fixed code (from successful attempt)
     """
     try:
-        # Create bug report in database
-        bug_report = crud.create_bug_report(
-            db=db,
-            description=f"{request.error_message[:200]}..."
-        )
-        bug_id = f"BUG-{bug_report.id}"
-        
-        # Create a session for tracking usage (using bug_id as session_id for now or random)
-        import uuid
-        session_id = str(uuid.uuid4())
-        crud.create_session(db=db, session_id=session_id, bug_report_id=bug_report.id)
-        
         # Get API key (from request or environment)
         api_key = request.openai_api_key or os.getenv("OPENAI_API_KEY")
         if not api_key:
@@ -144,6 +113,18 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
                 status_code=400,
                 detail="OpenAI API key is required. Provide it in the request or set OPENAI_API_KEY environment variable."
             )
+
+        # Create bug report in database
+        bug_report = crud.create_bug_report(
+            db=db,
+            description=f"{request.error_message[:200]}..."
+        )
+        bug_id = f"BUG-{bug_report.id}"
+        
+        # Create a session for tracking usage
+        import uuid
+        session_id = str(uuid.uuid4())
+        crud.create_session(db=db, session_id=session_id, bug_report_id=bug_report.id)
         
         # Initialize agent
         agent = BugExorcistAgent(bug_id=bug_id, openai_api_key=api_key)

@@ -8,12 +8,28 @@ import os
 import json
 import logging
 import re
+import datetime
 from dotenv import load_dotenv
 
+# NEW: Structured JSON Logging Formatter
+class JsonFormatter(logging.Formatter):
+    def format(self, record):
+        log_record = {
+            "timestamp": datetime.datetime.fromtimestamp(record.created).isoformat(),
+            "level": record.levelname,
+            "logger": record.name,
+            "message": record.getMessage(),
+        }
+        if record.exc_info:
+            log_record["exception"] = self.formatException(record.exc_info)
+        return json.dumps(log_record)
+
 # Configure logging
+handler = logging.StreamHandler()
+handler.setFormatter(JsonFormatter())
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    handlers=[handler]
 )
 logger = logging.getLogger(__name__)
 
