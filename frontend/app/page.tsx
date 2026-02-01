@@ -1,6 +1,19 @@
+"use client";
+
+import { useState, useEffect } from "react";
 import TerminalViewer from "../components/TerminalViewer";
 
 export default function Home() {
+    const [sessionId, setSessionId] = useState<string>("");
+
+    useEffect(() => {
+        // Generate a secure session ID for the demo
+        const secureId = typeof crypto !== 'undefined' && crypto.randomUUID 
+            ? `sess-${crypto.randomUUID()}` 
+            : `sess-${Math.random().toString(36).substring(2, 15)}-${Date.now().toString(36)}`;
+        setSessionId(secureId);
+    }, []);
+
     return (
         <div className="space-y-6">
             {/* Dashboard Stats */}
@@ -27,7 +40,7 @@ export default function Home() {
             </div>
 
             {/* Terminal Viewer */}
-            <TerminalViewer bugId="DEMO-404" />
+            {sessionId && <TerminalViewer sessionId={sessionId} />}
         </div>
     );
 }

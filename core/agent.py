@@ -410,7 +410,8 @@ Be systematic, thorough, and learn from failures."""
                         {
                             "attempt": attempt_num,
                             "confidence": fix_result.get('confidence', 0),
-                            "root_cause": fix_result.get('root_cause', '')[:200]
+                            "root_cause": fix_result.get('root_cause', '')[:200],
+                            "usage": fix_result.get('usage', {})
                         }
                     )
                     
@@ -696,6 +697,15 @@ Please provide:
             response = await self.llm.agenerate([messages])
             ai_response = response.generations[0][0].text
             
+            # Extract usage metrics
+            usage = response.llm_output.get("token_usage", {}) if response.llm_output else {}
+            prompt_tokens = usage.get("prompt_tokens", 0)
+            completion_tokens = usage.get("completion_tokens", 0)
+            
+            # Calculate estimated cost for GPT-4o
+            # Input: $5.00 / 1M tokens, Output: $15.00 / 1M tokens
+            estimated_cost = (prompt_tokens * 0.000005) + (completion_tokens * 0.000015)
+            
             # Parse the AI response
             result = self._parse_ai_response(ai_response, code_snippet)
             
@@ -708,7 +718,14 @@ Please provide:
                 "original_error": error_message,
                 "timestamp": datetime.now().isoformat(),
                 "attempt_number": attempt_number,
-                "retry_analysis": result.get("retry_analysis", "")
+                "retry_analysis": result.get("retry_analysis", ""),
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
+                    "estimated_cost": estimated_cost,
+                    "model": "gpt-4o"
+                }
             }
             
         except Exception as e:

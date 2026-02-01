@@ -6,7 +6,17 @@ Enhanced with Bug Exorcist Agent integration and WebSocket streaming.
 
 import os
 import json
+import logging
+import re
 from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.logs import router as logs_router
@@ -91,6 +101,18 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str):
         "stage": "initialization" | "analysis" | "fixing" | "verification" | "complete"
     }
     """
+    # Validate session_id format and length
+    if not session_id or len(session_id) > 100 or not re.match(r"^[a-zA-Z0-9\-_]+$", session_id):
+        await websocket.accept()
+        await websocket.send_json({
+            "type": "error",
+            "timestamp": __import__('datetime').datetime.now().isoformat(),
+            "message": "Invalid session ID format. Must be alphanumeric (plus - and _) and max 100 characters.",
+            "stage": "initialization"
+        })
+        await websocket.close()
+        return
+
     await websocket.accept()
     
     try:
@@ -144,12 +166,27 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str):
         db = SessionLocal()
         
         try:
+            # Check if session already exists to prevent hijacking/overwriting
+            existing_session = crud.get_session(db=db, session_id=session_id)
+            if existing_session:
+                await websocket.send_json({
+                    "type": "error",
+                    "timestamp": __import__('datetime').datetime.now().isoformat(),
+                    "message": f"Session {session_id} already exists. Please use a unique session ID.",
+                    "stage": "initialization"
+                })
+                await websocket.close()
+                return
+
             # Create bug report
             bug_report = crud.create_bug_report(
                 db=db,
                 description=f"{error_message[:200]}..."
             )
             bug_id = f"BUG-{bug_report.id}"
+            
+            # Create session for tracking
+            crud.create_session(db=db, session_id=session_id, bug_report_id=bug_report.id)
             
             # Get API key
             api_key = os.getenv("OPENAI_API_KEY")
@@ -167,6 +204,10 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str):
             agent = BugExorcistAgent(bug_id=bug_id, openai_api_key=api_key)
             
             # Stream the thought process
+            total_prompt_tokens = 0
+            total_completion_tokens = 0
+            total_cost = 0.0
+            
             async for event in agent.stream_thought_process(
                 error_message=error_message,
                 code_snippet=code_snippet,
@@ -175,6 +216,32 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str):
                 use_retry=use_retry,
                 max_attempts=max_attempts
             ):
+                # If this is a thought event with usage, accumulate it
+                if event.get("type") == "thought" and "usage" in event.get("data", {}):
+                    usage = event["data"]["usage"]
+                    total_prompt_tokens += usage.get("prompt_tokens", 0)
+                    total_completion_tokens += usage.get("completion_tokens", 0)
+                    total_cost += usage.get("estimated_cost", 0.0)
+                    
+                    # Update session in DB
+                    crud.update_session_usage(
+                        db=db,
+                        session_id=session_id,
+                        prompt_tokens=usage.get("prompt_tokens", 0),
+                        completion_tokens=usage.get("completion_tokens", 0),
+                        estimated_cost=usage.get("estimated_cost", 0.0)
+                    )
+                
+                # If this is the final result, add total usage to it
+                if event.get("type") == "result":
+                    event["data"]["usage"] = {
+                        "prompt_tokens": total_prompt_tokens,
+                        "completion_tokens": total_completion_tokens,
+                        "total_tokens": total_prompt_tokens + total_completion_tokens,
+                        "estimated_cost": f"{total_cost:.6f}",
+                        "session_id": session_id
+                    }
+                
                 # Send each thought event to the client
                 await websocket.send_json(event)
             
@@ -182,18 +249,18 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str):
             # (This would be determined by the last event)
             
         except Exception as e:
+            logger.exception(f"Agent error in session {session_id}")
             await websocket.send_json({
                 "type": "error",
                 "timestamp": __import__('datetime').datetime.now().isoformat(),
-                "message": f"Agent error: {str(e)}",
-                "stage": "error",
-                "data": {"error": str(e)}
+                "message": "An error occurred during agent analysis. Please try again later.",
+                "stage": "error"
             })
         finally:
             db.close()
         
     except WebSocketDisconnect:
-        print(f"[WebSocket] Client disconnected from session {session_id}")
+        logger.info(f"[WebSocket] Client disconnected from session {session_id}")
     except json.JSONDecodeError:
         await websocket.send_json({
             "type": "error",
@@ -202,12 +269,12 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str):
             "stage": "initialization"
         })
     except Exception as e:
-        print(f"[WebSocket] Error in session {session_id}: {str(e)}")
+        logger.exception(f"WebSocket error in session {session_id}")
         try:
             await websocket.send_json({
                 "type": "error",
                 "timestamp": __import__('datetime').datetime.now().isoformat(),
-                "message": f"Server error: {str(e)}",
+                "message": "Internal server error. Please try again later.",
                 "stage": "error"
             })
         except:

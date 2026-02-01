@@ -31,6 +31,17 @@ export default function TerminalViewer({
     const [thoughts, setThoughts] = useState<ThoughtEvent[]>([]);
     const [isConnected, setIsConnected] = useState(false);
     const [isProcessing, setIsProcessing] = useState(false);
+    const [usage, setUsage] = useState<{
+        prompt_tokens: number;
+        completion_tokens: number;
+        total_tokens: number;
+        estimated_cost: string;
+    }>({
+        prompt_tokens: 0,
+        completion_tokens: 0,
+        total_tokens: 0,
+        estimated_cost: "0.0000"
+    });
     const [connectionStatus, setConnectionStatus] = useState<'disconnected' | 'connecting' | 'connected' | 'error'>('disconnected');
     const scrollRef = useRef<HTMLDivElement>(null);
     const wsRef = useRef<WebSocket | null>(null);
@@ -86,6 +97,35 @@ export default function TerminalViewer({
             try {
                 const thoughtEvent: ThoughtEvent = JSON.parse(event.data);
                 addThought(thoughtEvent);
+
+                // Update usage if available in result or thought
+                if (thoughtEvent.type === 'result' && thoughtEvent.data?.usage) {
+                    setUsage(thoughtEvent.data.usage);
+                } else if (thoughtEvent.type === 'thought' && thoughtEvent.data?.usage) {
+                    setUsage(prev => {
+                        const newUsage = thoughtEvent.data.usage;
+                        if (!prev) {
+                            return {
+                                ...newUsage,
+                                estimated_cost: typeof newUsage.estimated_cost === 'number' 
+                                    ? newUsage.estimated_cost.toFixed(6) 
+                                    : newUsage.estimated_cost
+                            };
+                        }
+                        
+                        const prompt_tokens = prev.prompt_tokens + (newUsage.prompt_tokens || 0);
+                        const completion_tokens = prev.completion_tokens + (newUsage.completion_tokens || 0);
+                        const total_tokens = prompt_tokens + completion_tokens;
+                        const estimated_cost = (parseFloat(prev.estimated_cost) + (newUsage.estimated_cost || 0)).toFixed(6);
+                        
+                        return {
+                            prompt_tokens,
+                            completion_tokens,
+                            total_tokens,
+                            estimated_cost
+                        };
+                    });
+                }
 
                 // Check if processing is complete
                 if (thoughtEvent.type === 'result' || thoughtEvent.type === 'error') {
@@ -223,6 +263,17 @@ export default function TerminalViewer({
                             <>
                                 <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse shadow-[0_0_8px_#22c55e]"></div>
                                 <span className="text-green-400 text-[10px] uppercase tracking-wider">Live</span>
+                                <div className="flex items-center gap-3 ml-4 px-3 py-0.5 rounded-full bg-[#38ff14]/10 border border-[#38ff14]/20">
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="material-symbols-outlined text-[#38ff14] text-[14px]">token</span>
+                                        <span className="text-[#38ff14] text-[10px] font-mono">{usage.total_tokens.toLocaleString()} tokens</span>
+                                    </div>
+                                    <div className="w-[1px] h-3 bg-[#38ff14]/20"></div>
+                                    <div className="flex items-center gap-1.5">
+                                        <span className="material-symbols-outlined text-[#38ff14] text-[14px]">payments</span>
+                                        <span className="text-[#38ff14] text-[10px] font-mono">${parseFloat(usage.estimated_cost).toFixed(4)}</span>
+                                    </div>
+                                </div>
                             </>
                         )}
                         {connectionStatus === 'connecting' && (
@@ -342,7 +393,7 @@ export default function TerminalViewer({
             {/* Terminal Footer */}
             <div className="h-8 border-t border-[#2a3a27] bg-black/60 flex items-center justify-between px-4 text-[10px] font-mono shrink-0">
                 <div className="flex gap-4 text-[#38ff14]/40 uppercase tracking-widest">
-                    <span>Session: {sessionId.slice(0, 8)}</span>
+                    <span>Session: {sessionId?.slice(0, 8) || 'N/A'}</span>
                     <span>Thoughts: {thoughts.length}</span>
                 </div>
                 <div className="flex gap-4 items-center">

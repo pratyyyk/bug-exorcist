@@ -186,6 +186,23 @@ Please provide:
             response = await self.llm.agenerate([messages])
             ai_response = response.generations[0][0].text
             
+            # Extract usage metrics for Gemini
+            # LangChain Gemini usually puts usage in message.usage_metadata or llm_output
+            usage = {}
+            if response.llm_output:
+                usage = response.llm_output.get("token_usage", {})
+            
+            # Fallback for some LangChain versions
+            if not usage and hasattr(response.generations[0][0].message, "usage_metadata"):
+                usage = response.generations[0][0].message.usage_metadata
+            
+            prompt_tokens = usage.get("prompt_tokens", usage.get("input_token_count", 0))
+            completion_tokens = usage.get("completion_tokens", usage.get("output_token_count", 0))
+            
+            # Calculate estimated cost for Gemini 1.5 Pro
+            # Input: $3.50 / 1M tokens, Output: $10.50 / 1M tokens
+            estimated_cost = (prompt_tokens * 0.0000035) + (completion_tokens * 0.0000105)
+            
             # Parse the AI response
             result = self._parse_ai_response(ai_response, code_snippet)
             
@@ -200,7 +217,14 @@ Please provide:
                 "timestamp": datetime.now().isoformat(),
                 "attempt_number": attempt_number,
                 "retry_analysis": result.get("retry_analysis", ""),
-                "gpt_failed": gpt_failure_context is not None
+                "gpt_failed": gpt_failure_context is not None,
+                "usage": {
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": prompt_tokens + completion_tokens,
+                    "estimated_cost": estimated_cost,
+                    "model": "gemini-1.5-pro"
+                }
             }
             
         except Exception as e:
