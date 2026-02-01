@@ -7,8 +7,11 @@ export default function Home() {
     const [sessionId, setSessionId] = useState<string>("");
 
     useEffect(() => {
-        // Generate a simple session ID for the demo
-        setSessionId(`sess-${Math.random().toString(36).substring(2, 10)}`);
+        // Generate a secure session ID for the demo
+        const secureId = typeof crypto !== 'undefined' && crypto.randomUUID 
+            ? `sess-${crypto.randomUUID()}` 
+            : `sess-${Math.random().toString(36).substring(2, 15)}-${Date.now().toString(36)}`;
+        setSessionId(secureId);
     }, []);
 
     return (
