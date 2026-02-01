@@ -151,6 +151,9 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str):
             )
             bug_id = f"BUG-{bug_report.id}"
             
+            # Create session for tracking
+            crud.create_session(db=db, session_id=session_id, bug_report_id=bug_report.id)
+            
             # Get API key
             api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
@@ -167,6 +170,10 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str):
             agent = BugExorcistAgent(bug_id=bug_id, openai_api_key=api_key)
             
             # Stream the thought process
+            total_prompt_tokens = 0
+            total_completion_tokens = 0
+            total_cost = 0.0
+            
             async for event in agent.stream_thought_process(
                 error_message=error_message,
                 code_snippet=code_snippet,
@@ -175,6 +182,32 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str):
                 use_retry=use_retry,
                 max_attempts=max_attempts
             ):
+                # If this is a thought event with usage, accumulate it
+                if event.get("type") == "thought" and "usage" in event.get("data", {}):
+                    usage = event["data"]["usage"]
+                    total_prompt_tokens += usage.get("prompt_tokens", 0)
+                    total_completion_tokens += usage.get("completion_tokens", 0)
+                    total_cost += usage.get("estimated_cost", 0.0)
+                    
+                    # Update session in DB
+                    crud.update_session_usage(
+                        db=db,
+                        session_id=session_id,
+                        prompt_tokens=usage.get("prompt_tokens", 0),
+                        completion_tokens=usage.get("completion_tokens", 0),
+                        estimated_cost=usage.get("estimated_cost", 0.0)
+                    )
+                
+                # If this is the final result, add total usage to it
+                if event.get("type") == "result":
+                    event["data"]["usage"] = {
+                        "prompt_tokens": total_prompt_tokens,
+                        "completion_tokens": total_completion_tokens,
+                        "total_tokens": total_prompt_tokens + total_completion_tokens,
+                        "estimated_cost": f"{total_cost:.6f}",
+                        "session_id": session_id
+                    }
+                
                 # Send each thought event to the client
                 await websocket.send_json(event)
             
