@@ -10,6 +10,9 @@ from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 import os
+import logging
+
+logger = logging.getLogger(__name__)
 
 from core.agent import BugExorcistAgent, quick_fix, fix_with_retry
 from app.database import SessionLocal
@@ -213,10 +216,10 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
                         }
                     )
                 else:
+                    logger.error(f"Analysis failed for {bug_id} after {retry_result['total_attempts']} attempts. Last error: {retry_result.get('last_error', 'Unknown')}")
                     raise HTTPException(
                         status_code=500,
-                        detail=f"Failed to fix bug after {retry_result['total_attempts']} attempts. "
-                               f"Last error: {retry_result.get('last_error', 'Unknown')}"
+                        detail="Analysis failed: Maximum retry attempts reached without a valid fix."
                     )
         else:
             # Single attempt (original behavior)
@@ -257,7 +260,8 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Analysis failed: {str(e)}")
+        logger.exception(f"Unexpected error during analysis for {bug_id if 'bug_id' in locals() else 'unknown session'}")
+        raise HTTPException(status_code=500, detail="An unexpected error occurred during bug analysis. Please try again.")
 
 
 @router.post("/fix-with-retry", response_model=RetryFixResponse)
@@ -313,7 +317,8 @@ async def fix_bug_with_retry(request: RetryFixRequest, db: Session = Depends(get
         return RetryFixResponse(**result)
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Retry fix failed: {str(e)}")
+        logger.exception(f"Retry fix failed for {bug_id if 'bug_id' in locals() else 'unknown'}")
+        raise HTTPException(status_code=500, detail="Retry fix process failed. Please check server logs.")
 
 
 @router.post("/quick-fix", response_model=QuickFixResponse)
@@ -347,7 +352,8 @@ async def quick_fix_endpoint(request: QuickFixRequest):
         return QuickFixResponse(fixed_code=fixed)
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Quick fix failed: {str(e)}")
+        logger.exception("Quick fix failed")
+        raise HTTPException(status_code=500, detail="Quick fix failed. Please check server logs.")
 
 
 @router.get("/health")

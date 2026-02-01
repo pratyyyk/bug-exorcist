@@ -1,5 +1,8 @@
+import logging
 from sqlalchemy.orm import Session
 from . import models
+
+logger = logging.getLogger(__name__)
 
 def get_bug_report(db: Session, bug_report_id: int):
     return db.query(models.BugReport).filter(models.BugReport.id == bug_report_id).first()
@@ -34,13 +37,27 @@ def get_session(db: Session, session_id: str):
 
 def update_session_usage(db: Session, session_id: str, prompt_tokens: int, completion_tokens: int, estimated_cost: float):
     db_session = db.query(models.Session).filter(models.Session.id == session_id).first()
-    if db_session:
+    if not db_session:
+        logger.warning(f"Session {session_id} not found for usage update")
+        return None
+        
+    try:
         db_session.prompt_tokens += prompt_tokens
         db_session.completion_tokens += completion_tokens
         db_session.total_tokens = db_session.prompt_tokens + db_session.completion_tokens
-        # Update cost (assuming estimated_cost is a float, we store it as string for precision or just format it)
-        current_cost = float(db_session.estimated_cost)
+        
+        # Robust cost parsing with fallback
+        try:
+            current_cost = float(db_session.estimated_cost or 0)
+        except (ValueError, TypeError) as e:
+            logger.error(f"Failed to parse current cost '{db_session.estimated_cost}' for session {session_id}: {e}")
+            current_cost = 0.0
+            
         db_session.estimated_cost = f"{current_cost + estimated_cost:.6f}"
         db.commit()
         db.refresh(db_session)
-    return db_session
+        return db_session
+    except Exception as e:
+        logger.error(f"Error updating session usage for {session_id}: {e}")
+        db.rollback()
+        return None

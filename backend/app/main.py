@@ -6,7 +6,17 @@ Enhanced with Bug Exorcist Agent integration and WebSocket streaming.
 
 import os
 import json
+import logging
+import re
 from dotenv import load_dotenv
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from app.api.logs import router as logs_router
@@ -91,6 +101,18 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str):
         "stage": "initialization" | "analysis" | "fixing" | "verification" | "complete"
     }
     """
+    # Validate session_id format and length
+    if not session_id or len(session_id) > 100 or not re.match(r"^[a-zA-Z0-9\-_]+$", session_id):
+        await websocket.accept()
+        await websocket.send_json({
+            "type": "error",
+            "timestamp": __import__('datetime').datetime.now().isoformat(),
+            "message": "Invalid session ID format. Must be alphanumeric (plus - and _) and max 100 characters.",
+            "stage": "initialization"
+        })
+        await websocket.close()
+        return
+
     await websocket.accept()
     
     try:
@@ -144,6 +166,18 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str):
         db = SessionLocal()
         
         try:
+            # Check if session already exists to prevent hijacking/overwriting
+            existing_session = crud.get_session(db=db, session_id=session_id)
+            if existing_session:
+                await websocket.send_json({
+                    "type": "error",
+                    "timestamp": __import__('datetime').datetime.now().isoformat(),
+                    "message": f"Session {session_id} already exists. Please use a unique session ID.",
+                    "stage": "initialization"
+                })
+                await websocket.close()
+                return
+
             # Create bug report
             bug_report = crud.create_bug_report(
                 db=db,
@@ -215,18 +249,18 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str):
             # (This would be determined by the last event)
             
         except Exception as e:
+            logger.exception(f"Agent error in session {session_id}")
             await websocket.send_json({
                 "type": "error",
                 "timestamp": __import__('datetime').datetime.now().isoformat(),
-                "message": f"Agent error: {str(e)}",
-                "stage": "error",
-                "data": {"error": str(e)}
+                "message": "An error occurred during agent analysis. Please try again later.",
+                "stage": "error"
             })
         finally:
             db.close()
         
     except WebSocketDisconnect:
-        print(f"[WebSocket] Client disconnected from session {session_id}")
+        logger.info(f"[WebSocket] Client disconnected from session {session_id}")
     except json.JSONDecodeError:
         await websocket.send_json({
             "type": "error",
@@ -235,12 +269,12 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str):
             "stage": "initialization"
         })
     except Exception as e:
-        print(f"[WebSocket] Error in session {session_id}: {str(e)}")
+        logger.exception(f"WebSocket error in session {session_id}")
         try:
             await websocket.send_json({
                 "type": "error",
                 "timestamp": __import__('datetime').datetime.now().isoformat(),
-                "message": f"Server error: {str(e)}",
+                "message": "Internal server error. Please try again later.",
                 "stage": "error"
             })
         except:
