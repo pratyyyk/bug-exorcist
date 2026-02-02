@@ -75,6 +75,11 @@ class RetryFixResponse(BaseModel):
     last_error: Optional[str] = None
 
 
+class VerifyFixRequest(BaseModel):
+    """Request model for bug fix verification"""
+    fixed_code: str = Field(..., description="The fixed code to verify")
+
+
 class QuickFixRequest(BaseModel):
     """Request model for quick fix"""
     error: str
@@ -449,25 +454,31 @@ async def list_bugs(skip: int = 0, limit: int = 100, db: Session = Depends(get_d
         count=len(bug_responses)
     )
 
-
 @router.post("/bugs/{bug_id}/verify", response_model=VerificationResponse)
-async def verify_bug_fix(bug_id: str, fixed_code: str, db: Session = Depends(get_db)) -> VerificationResponse:
+async def verify_bug_fix(bug_id: str, request: VerifyFixRequest, db: Session = Depends(get_db)) -> VerificationResponse:
     """
     Verify a bug fix by running it in a sandbox.
     
     Args:
-        bug_id: ID of the bug report
-        fixed_code: The fixed code to verify
+        bug_id: ID of the bug report (format: "BUG-{numeric_id}")
+        request: Request containing the fixed code to verify
         db: Database session
         
     Returns:
         Verification results
     """
-    # Parse numeric ID from "BUG-{id}" format
-    if bug_id.startswith("BUG-"):
-        numeric_id = int(bug_id.replace("BUG-", ""))
-    else:
-        numeric_id = int(bug_id)
+    # Parse numeric ID from "BUG-{id}" format with proper error handling
+    try:
+        if bug_id.startswith("BUG-"):
+            numeric_id = int(bug_id.replace("BUG-", ""))
+        else:
+            # If no prefix, try to parse as int directly
+            numeric_id = int(bug_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid bug_id format: '{bug_id}'. Expected format: 'BUG-{{numeric_id}}' or plain numeric ID"
+        )
     
     bug_report = crud.get_bug_report(db, numeric_id)
     
@@ -475,10 +486,10 @@ async def verify_bug_fix(bug_id: str, fixed_code: str, db: Session = Depends(get
         raise HTTPException(status_code=404, detail="Bug not found")
     
     # Initialize agent
-    agent = BugExorcistAgent(bug_id=f"BUG-{bug_id}")
+    agent = BugExorcistAgent(bug_id=f"BUG-{numeric_id}")
     
     # Verify the fix
-    verification = await agent.verify_fix(fixed_code)
+    verification = await agent.verify_fix(request.fixed_code)
     
     # Update status if verified
     if verification['verified']:
