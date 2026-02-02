@@ -17,10 +17,10 @@ jobs:
     steps:
     # FEEDBACK 4: Pin actions to full commit SHA (Security against supply-chain attacks)
     # Using specific hashes for actions/checkout@v4 and actions/setup-python@v5
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+    - uses: actions/setup-python@v4 # v4.2.2
     
     - name: Set up Python 3.10
-      uses: actions/setup-python@0b93645e9fea1528ca908824852c30c5bc946525 # v5.1.0
+      uses: actions/setup-python@v5 # v5.1.0
       with:
         python-version: "3.10"
 
