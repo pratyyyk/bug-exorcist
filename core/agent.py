@@ -18,13 +18,17 @@ from typing import Dict, Optional, Any, List, AsyncGenerator, Callable, Awaitabl
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from core.ollama_provider import OllamaProvider
+from core.gemini_agent import GeminiFallbackAgent, is_gemini_available
+
 
 class BugExorcistAgent:
     """
     Autonomous debugging agent that analyzes and fixes bugs using AI.
     
     Features:
-    - GPT-4o powered analysis with Gemini fallback
+    - Multi-provider support (GPT-4o, Gemini, Ollama)
+    - Configurable primary and secondary agents via .env
     - Automatic retry logic with learning
     - Docker sandbox verification
     - Real-time thought streaming via WebSocket
@@ -82,35 +86,42 @@ Be systematic, thorough, and learn from failures."""
             openai_api_key: OpenAI API key (uses env var if not provided)
         """
         self.bug_id = bug_id
-        self.api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
         
-        if not self.api_key:
-            raise ValueError("OpenAI API key is required")
+        # Configuration for agents
+        self.primary_agent_type = os.getenv("PRIMARY_AGENT", "gpt-4o").lower()
+        self.secondary_agent_type = os.getenv("SECONDARY_AGENT", "gemini-1.5-pro").lower()
         
-        # Initialize GPT-4o via LangChain
-        self.llm = ChatOpenAI(
-            model="gpt-4o",
-            temperature=0.2,
-            api_key=self.api_key,
-            max_tokens=2000
-        )
-        
-        # Initialize Gemini fallback if available
-        self.gemini_agent = None
-        try:
-            from core.gemini_agent import GeminiFallbackAgent, is_gemini_available
-            if is_gemini_available():
-                self.gemini_agent = GeminiFallbackAgent()
-        except ImportError:
-            pass
+        # Initialize providers
+        self.primary_provider = self._init_provider(self.primary_agent_type, openai_api_key)
+        self.secondary_provider = self._init_provider(self.secondary_agent_type)
         
         # Initialize fallback handler
         from core.fallback import get_fallback_handler
         self.fallback_handler = get_fallback_handler()
         
         # Initialize sandbox
-        from app.sandbox import Sandbox
+        from backend.app.sandbox import Sandbox
         self.sandbox = Sandbox()
+
+    def _init_provider(self, agent_type: str, api_key: Optional[str] = None) -> Any:
+        """Initialize a specific AI provider based on type."""
+        if agent_type == "gpt-4o":
+            key = api_key or os.getenv("OPENAI_API_KEY")
+            if not key:
+                return None
+            return ChatOpenAI(
+                model="gpt-4o",
+                temperature=0.2,
+                api_key=key,
+                max_tokens=2000
+            )
+        elif agent_type == "gemini-1.5-pro":
+            if is_gemini_available():
+                return GeminiFallbackAgent()
+        elif agent_type == "ollama":
+            return OllamaProvider()
+        
+        return None
 
     async def _execute_retry_logic(
         self,
@@ -126,46 +137,34 @@ Be systematic, thorough, and learn from failures."""
     ) -> Dict[str, Any]:
         """
         **PRIVATE SHARED HELPER** - Execute retry logic for bug fixing.
-        
-        This is the core retry logic shared by both:
-        1. REST API endpoint (analyze_and_fix_with_retry)
-        2. WebSocket streaming endpoint (stream_thought_process)
-        
-        The callbacks allow the streaming method to emit events while the REST
-        method can simply ignore them or use them for logging.
-        
-        Args:
-            error_message: The error/exception message
-            code_snippet: The problematic code
-            file_path: Optional file path
-            additional_context: Optional additional context
-            max_attempts: Maximum number of retry attempts
-            on_attempt_start: Optional async callback(attempt_num, ai_model, using_gemini)
-            on_fix_generated: Optional async callback(attempt_num, fix_result)
-            on_verification_complete: Optional async callback(attempt_num, verification, verified)
-            on_attempt_failed: Optional async callback(attempt_num, error_msg)
-            
-        Returns:
-            Dictionary containing:
-            - success: bool - Whether a working fix was found
-            - final_fix: Dict - The successful fix (if success=True)
-            - all_attempts: List[Dict] - All attempt records
-            - total_attempts: int - Number of attempts made
-            - message: str - Result message
-            - last_error: str - Last error encountered (if success=False)
-            - ai_model: str - The AI model that succeeded (if success=True)
-            - fallback_response: Dict - Fallback guidance (if enabled and failed)
         """
         all_attempts = []
         
         for attempt_num in range(1, max_attempts + 1):
             # Determine which AI to use
-            use_gemini = attempt_num > 1 and self.gemini_agent is not None
-            ai_model = "gemini-1.5-pro" if use_gemini else "gpt-4o"
+            # Attempt 1: Primary
+            # Attempt 2+: Secondary (if available), otherwise Primary
+            use_secondary = attempt_num > 1 and self.secondary_provider is not None
+            current_provider = self.secondary_provider if use_secondary else self.primary_provider
             
+            # Fallback if primary is not configured
+            if current_provider is None:
+                current_provider = self.secondary_provider
+            
+            if current_provider is None:
+                raise ValueError("No AI providers are configured. Check your .env file.")
+
+            # Get model name for reporting
+            if hasattr(current_provider, "model_name"):
+                ai_model = current_provider.model_name
+            elif hasattr(current_provider, "model"):
+                ai_model = current_provider.model
+            else:
+                ai_model = str(current_provider)
+
             # Notify: attempt starting
             if on_attempt_start:
-                await on_attempt_start(attempt_num, ai_model, use_gemini)
+                await on_attempt_start(attempt_num, ai_model, use_secondary)
             
             try:
                 # Perform analysis
@@ -175,7 +174,7 @@ Be systematic, thorough, and learn from failures."""
                     file_path=file_path,
                     additional_context=additional_context,
                     previous_attempts=all_attempts,
-                    use_gemini=use_gemini
+                    use_secondary=use_secondary
                 )
                 
                 # Notify: fix generated
@@ -388,12 +387,12 @@ Be systematic, thorough, and learn from failures."""
                 )
                 
                 # Define callbacks for the shared retry logic
-                async def on_attempt_start(attempt_num: int, ai_model: str, using_gemini: bool):
+                async def on_attempt_start(attempt_num: int, ai_model: str, using_secondary: bool):
                     """Called before each attempt"""
                     yield emit_thought(
                         f"🤖 Attempt {attempt_num}/{max_attempts}: Requesting AI analysis...",
                         "analysis",
-                        {"attempt": attempt_num, "total_attempts": max_attempts, "using_gemini": using_gemini}
+                        {"attempt": attempt_num, "total_attempts": max_attempts, "using_secondary": using_secondary}
                     )
                     
                     yield emit_thought(
@@ -608,27 +607,26 @@ Be systematic, thorough, and learn from failures."""
         file_path: Optional[str] = None,
         additional_context: Optional[str] = None,
         previous_attempts: Optional[List[Dict[str, Any]]] = None,
-        use_gemini: bool = False
+        use_secondary: bool = False
     ) -> Dict[str, Any]:
         """
         Analyze an error and generate a fix using AI.
-        
-        Args:
-            error_message: The error/exception message
-            code_snippet: The problematic code
-            file_path: Optional file path for context
-            additional_context: Optional additional context
-            previous_attempts: Optional list of previous failed attempts
-            use_gemini: Whether to use Gemini instead of GPT-4o
-            
-        Returns:
-            Dictionary containing analysis results
         """
         attempt_number = len(previous_attempts) + 1 if previous_attempts else 1
         
-        # Use Gemini if requested and available
-        if use_gemini and self.gemini_agent:
-            return await self.gemini_agent.analyze_error(
+        # Determine which provider to use
+        provider = self.secondary_provider if use_secondary else self.primary_provider
+        
+        # Fallback if primary is not configured
+        if provider is None:
+            provider = self.secondary_provider
+            
+        if provider is None:
+            raise ValueError("No AI providers are configured")
+
+        # If it's a dedicated provider class (Gemini or Ollama), use its analyze_error
+        if hasattr(provider, "analyze_error"):
+            return await provider.analyze_error(
                 error_message=error_message,
                 code_snippet=code_snippet,
                 file_path=file_path,
@@ -636,6 +634,7 @@ Be systematic, thorough, and learn from failures."""
                 previous_attempts=previous_attempts
             )
         
+        # Otherwise it's a LangChain LLM (like ChatOpenAI) - use internal logic
         # Construct the analysis prompt
         user_prompt = f"""Analyze and fix this bug:
 
@@ -688,29 +687,34 @@ Please provide:
             user_prompt += "4. What was wrong with the previous attempt(s) and how this fix is different\n"
         
         try:
-            # Call GPT-4o via LangChain
+            # Call LLM via LangChain
             messages = [
                 SystemMessage(content=self.SYSTEM_PROMPT),
                 HumanMessage(content=user_prompt)
             ]
             
-            response = await self.llm.agenerate([messages])
-            ai_response = response.generations[0][0].text
+            # Using ainvoke for consistency
+            response = await provider.ainvoke(messages)
+            ai_response = response.content
             
-            # Extract usage metrics
-            usage = response.llm_output.get("token_usage", {}) if response.llm_output else {}
-            prompt_tokens = usage.get("prompt_tokens", 0)
-            completion_tokens = usage.get("completion_tokens", 0)
+            # Extract usage metrics if available
+            usage = {}
+            if hasattr(response, "usage_metadata"):
+                usage = response.usage_metadata
             
-            # Calculate estimated cost for GPT-4o
-            # Input: $5.00 / 1M tokens, Output: $15.00 / 1M tokens
-            estimated_cost = (prompt_tokens * 0.000005) + (completion_tokens * 0.000015)
+            prompt_tokens = usage.get("prompt_tokens", usage.get("input_tokens", 0))
+            completion_tokens = usage.get("completion_tokens", usage.get("output_tokens", 0))
+            
+            # Calculate estimated cost for GPT-4o if applicable
+            estimated_cost = 0
+            if self.primary_agent_type == "gpt-4o" and not use_secondary:
+                estimated_cost = (prompt_tokens * 0.000005) + (completion_tokens * 0.000015)
             
             # Parse the AI response
             result = self._parse_ai_response(ai_response, code_snippet)
             
             return {
-                "ai_agent": "gpt-4o",
+                "ai_agent": getattr(provider, "model_name", str(provider)),
                 "root_cause": result["root_cause"],
                 "fixed_code": result["fixed_code"],
                 "explanation": result["explanation"],
@@ -724,20 +728,20 @@ Please provide:
                     "completion_tokens": completion_tokens,
                     "total_tokens": prompt_tokens + completion_tokens,
                     "estimated_cost": estimated_cost,
-                    "model": "gpt-4o"
+                    "model": getattr(provider, "model_name", "unknown")
                 }
             }
             
         except Exception as e:
-            # If GPT-4o fails, try Gemini fallback
-            if self.gemini_agent and not use_gemini:
-                return await self.gemini_agent.analyze_error(
+            # If primary fails and we have a secondary, try secondary
+            if not use_secondary and self.secondary_provider:
+                return await self.analyze_error(
                     error_message=error_message,
                     code_snippet=code_snippet,
                     file_path=file_path,
                     additional_context=additional_context,
                     previous_attempts=previous_attempts,
-                    gpt_failure_context=f"GPT-4o failed: {str(e)}"
+                    use_secondary=True
                 )
             
             raise Exception(f"AI analysis failed: {str(e)}")
@@ -801,7 +805,12 @@ Please provide:
             Dictionary containing verification results
         """
         try:
-            result = self.sandbox.run_code(fixed_code)
+            # Check if run_code is a coroutine or a normal function
+            import asyncio
+            if asyncio.iscoroutinefunction(self.sandbox.run_code):
+                result = await self.sandbox.run_code(fixed_code)
+            else:
+                result = self.sandbox.run_code(fixed_code)
             
             # Check if execution was successful
             verified = not result.startswith("Error")

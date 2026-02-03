@@ -9,6 +9,7 @@ langchain
 langchain-openai
 langchain-core
 langchain-google-genai
+langchain-ollama  # NEW: Local LLM support
 openai
 tiktoken
 google-generativeai
