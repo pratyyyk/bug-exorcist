@@ -283,12 +283,12 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str) -> Non
                 "message": "Internal server error. Please try again later.",
                 "stage": "error"
             })
-        except:
+        except Exception:
             pass
     finally:
         try:
             await websocket.close()
-        except:
+        except Exception:
             pass
 
 

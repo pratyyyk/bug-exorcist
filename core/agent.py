@@ -18,8 +18,8 @@ from typing import Dict, Optional, Any, List, AsyncGenerator, Callable, Awaitabl
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from core.ollama_provider import OllamaProvider
 from core.gemini_agent import GeminiFallbackAgent, is_gemini_available
+from core.ollama_provider import get_ollama_llm, is_ollama_available
 
 
 class BugExorcistAgent:
@@ -117,9 +117,12 @@ Be systematic, thorough, and learn from failures."""
             )
         elif agent_type == "gemini-1.5-pro":
             if is_gemini_available():
-                return GeminiFallbackAgent()
+                from core.gemini_agent import GeminiFallbackAgent
+                gemini = GeminiFallbackAgent()
+                return gemini.llm
         elif agent_type == "ollama":
-            return OllamaProvider()
+            if is_ollama_available():
+                return get_ollama_llm()
         
         return None
 
@@ -624,17 +627,7 @@ Be systematic, thorough, and learn from failures."""
         if provider is None:
             raise ValueError("No AI providers are configured")
 
-        # If it's a dedicated provider class (Gemini or Ollama), use its analyze_error
-        if hasattr(provider, "analyze_error"):
-            return await provider.analyze_error(
-                error_message=error_message,
-                code_snippet=code_snippet,
-                file_path=file_path,
-                additional_context=additional_context,
-                previous_attempts=previous_attempts
-            )
-        
-        # Otherwise it's a LangChain LLM (like ChatOpenAI) - use internal logic
+        # All analysis logic is now centralized here
         # Construct the analysis prompt
         user_prompt = f"""Analyze and fix this bug:
 
@@ -713,8 +706,17 @@ Please provide:
             # Parse the AI response
             result = self._parse_ai_response(ai_response, code_snippet)
             
+            # Get model name for reporting
+            model_name = "unknown"
+            if hasattr(provider, "model_name"):
+                model_name = provider.model_name
+            elif hasattr(provider, "model"):
+                model_name = provider.model
+            elif hasattr(provider, "model_id"):
+                model_name = provider.model_id
+            
             return {
-                "ai_agent": getattr(provider, "model_name", str(provider)),
+                "ai_agent": model_name,
                 "root_cause": result["root_cause"],
                 "fixed_code": result["fixed_code"],
                 "explanation": result["explanation"],
@@ -728,7 +730,7 @@ Please provide:
                     "completion_tokens": completion_tokens,
                     "total_tokens": prompt_tokens + completion_tokens,
                     "estimated_cost": estimated_cost,
-                    "model": getattr(provider, "model_name", "unknown")
+                    "model": model_name
                 }
             }
             
@@ -748,42 +750,65 @@ Please provide:
 
     def _parse_ai_response(self, ai_response: str, original_code: str) -> Dict[str, Any]:
         """
-        Parse AI's response to extract structured components.
+        Parse AI's response to extract structured components using a state machine.
         """
         lines = ai_response.split('\n')
         
-        root_cause = ""
-        fixed_code = ""
-        explanation = ""
-        retry_analysis = ""
-        in_code_block = False
+        root_cause_lines = []
+        fixed_code_lines = []
+        explanation_lines = []
+        retry_analysis_lines = []
         
-        for i, line in enumerate(lines):
-            # Detect code blocks
-            if '```python' in line.lower() or '```' in line:
-                in_code_block = not in_code_block
+        # States: None, 'root_cause', 'code', 'explanation', 'retry_analysis'
+        current_state = None
+        
+        for line in lines:
+            lower_line = line.lower().strip()
+            
+            # State transitions
+            if '```' in lower_line:
+                if current_state != 'code':
+                    current_state = 'code'
+                    if 'python' not in lower_line:
+                        continue # Skip the ``` line itself
+                else:
+                    current_state = None
+                    continue
+            elif 'root cause' in lower_line:
+                current_state = 'root_cause'
+                continue
+            elif 'explanation' in lower_line or 'changes' in lower_line:
+                current_state = 'explanation'
+                continue
+            elif 'wrong with' in lower_line or 'previous attempt' in lower_line:
+                current_state = 'retry_analysis'
                 continue
             
-            if in_code_block:
-                fixed_code += line + '\n'
-            elif 'root cause' in line.lower() and i + 1 < len(lines):
-                # Capture next few lines as root cause
-                root_cause = '\n'.join(lines[i+1:i+4]).strip()
-            elif 'explanation' in line.lower() or 'changes' in line.lower():
-                explanation = '\n'.join(lines[i+1:i+5]).strip()
-            elif 'wrong with' in line.lower() or 'previous attempt' in line.lower():
-                retry_analysis = '\n'.join(lines[i:i+4]).strip()
+            # State actions
+            if current_state == 'root_cause':
+                root_cause_lines.append(line)
+            elif current_state == 'code':
+                fixed_code_lines.append(line)
+            elif current_state == 'explanation':
+                explanation_lines.append(line)
+            elif current_state == 'retry_analysis':
+                retry_analysis_lines.append(line)
+        
+        fixed_code = '\n'.join(fixed_code_lines).strip()
+        root_cause = '\n'.join(root_cause_lines).strip()
+        explanation = '\n'.join(explanation_lines).strip()
+        retry_analysis = '\n'.join(retry_analysis_lines).strip()
         
         # Fallback: if no code found, use original
-        if not fixed_code.strip():
+        if not fixed_code:
             fixed_code = original_code
         
         # Estimate confidence based on response quality
-        confidence = 0.85 if fixed_code.strip() and root_cause else 0.6
+        confidence = 0.85 if fixed_code and root_cause else 0.6
         
         return {
             "root_cause": root_cause or "Analysis completed",
-            "fixed_code": fixed_code.strip(),
+            "fixed_code": fixed_code,
             "explanation": explanation or "Code has been fixed",
             "confidence": confidence,
             "retry_analysis": retry_analysis

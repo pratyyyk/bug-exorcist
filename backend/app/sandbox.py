@@ -63,5 +63,5 @@ class Sandbox:
             if container:
                 try:
                     container.remove(force=True)
-                except:
+                except Exception:
                     pass

@@ -406,7 +406,7 @@ async def agent_health() -> AgentHealthResponse:
             "automated_verification",
             "automatic_retry_logic",
             "multi_ai_fallback",
-            "local_llm_support" if ollama_available else ""
+            *(["local_llm_support"] if ollama_available else [])
         ],
         retry_config={
             "enabled": True,
