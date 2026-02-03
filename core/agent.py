@@ -100,7 +100,7 @@ Be systematic, thorough, and learn from failures."""
         self.fallback_handler = get_fallback_handler()
         
         # Initialize sandbox
-        from backend.app.sandbox import Sandbox
+        from app.sandbox import Sandbox
         self.sandbox = Sandbox()
 
     def _init_provider(self, agent_type: str, api_key: Optional[str] = None) -> Any:
@@ -805,12 +805,7 @@ Please provide:
             Dictionary containing verification results
         """
         try:
-            # Check if run_code is a coroutine or a normal function
-            import asyncio
-            if asyncio.iscoroutinefunction(self.sandbox.run_code):
-                result = await self.sandbox.run_code(fixed_code)
-            else:
-                result = self.sandbox.run_code(fixed_code)
+            result = self.sandbox.run_code(fixed_code)
             
             # Check if execution was successful
             verified = not result.startswith("Error")
