@@ -138,6 +138,7 @@ class AgentHealthResponse(BaseModel):
     gemini_key_configured: bool = False
     gemini_fallback_enabled: bool = False
     gemini_fallback_available: bool = False
+    ollama_available: bool = False
     langchain_available: bool
     capabilities: List[str]
     retry_config: Dict[str, Any]
@@ -156,17 +157,9 @@ def get_db() -> Generator[Session, None, None]:
 @router.post("/analyze", response_model=BugAnalysisResponse)
 async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)) -> BugAnalysisResponse:
     """
-    Analyze a bug and generate a fix using GPT-4o.
+    Analyze a bug and generate a fix using the configured AI agent.
     """
     try:
-        # Get API key (from request or environment)
-        api_key = request.openai_api_key or os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise HTTPException(
-                status_code=400,
-                detail="OpenAI API key is required. Provide it in the request or set OPENAI_API_KEY environment variable."
-            )
-
         # Create bug report in database
         bug_report = crud.create_bug_report(
             db=db,
@@ -180,7 +173,7 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
         crud.create_session(db=db, session_id=session_id, bug_report_id=bug_report.id)
         
         # Initialize agent
-        agent = BugExorcistAgent(bug_id=bug_id, openai_api_key=api_key)
+        agent = BugExorcistAgent(bug_id=bug_id, openai_api_key=request.openai_api_key)
         
         if request.use_retry:
             # Use retry logic
@@ -324,16 +317,8 @@ async def fix_bug_with_retry(request: RetryFixRequest, db: Session = Depends(get
         )
         bug_id = f"BUG-{bug_report.id}"
         
-        # Get API key
-        api_key = request.openai_api_key or os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise HTTPException(
-                status_code=400,
-                detail="OpenAI API key is required"
-            )
-        
         # Initialize agent and run retry logic
-        agent = BugExorcistAgent(bug_id=bug_id, openai_api_key=api_key)
+        agent = BugExorcistAgent(bug_id=bug_id, openai_api_key=request.openai_api_key)
         result = await agent.analyze_and_fix_with_retry(
             error_message=request.error_message,
             code_snippet=request.code_snippet,
@@ -370,17 +355,10 @@ async def quick_fix_endpoint(request: QuickFixRequest) -> QuickFixResponse:
         Only the fixed code
     """
     try:
-        api_key = request.openai_api_key or os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise HTTPException(
-                status_code=400,
-                detail="OpenAI API key is required"
-            )
-        
         fixed = await quick_fix(
             error=request.error,
             code=request.code,
-            api_key=api_key
+            api_key=request.openai_api_key
         )
         
         return QuickFixResponse(fixed_code=fixed)
@@ -399,21 +377,27 @@ async def agent_health() -> AgentHealthResponse:
         Health status and configuration info including retry and AI fallback capabilities
     """
     from core.gemini_agent import is_gemini_enabled, is_gemini_available
+    from core.ollama_provider import is_ollama_available
     
     api_key_set = bool(os.getenv("OPENAI_API_KEY"))
     gemini_key_set = bool(os.getenv("GEMINI_API_KEY"))
     gemini_enabled = is_gemini_enabled()
     gemini_available = is_gemini_available()
+    ollama_available = is_ollama_available()
+    
+    primary_agent = os.getenv("PRIMARY_AGENT", "gpt-4o")
+    secondary_agent = os.getenv("SECONDARY_AGENT", "gemini-1.5-pro")
     
     return AgentHealthResponse(
         status="operational",
         agent="Bug Exorcist",
-        primary_model="gpt-4o",
-        fallback_model="gemini-1.5-pro" if gemini_available else None,
+        primary_model=primary_agent,
+        fallback_model=secondary_agent,
         api_key_configured=api_key_set,
         gemini_key_configured=gemini_key_set,
         gemini_fallback_enabled=gemini_enabled,
         gemini_fallback_available=gemini_available,
+        ollama_available=ollama_available,
         langchain_available=True,
         capabilities=[
             "error_analysis",
@@ -421,7 +405,8 @@ async def agent_health() -> AgentHealthResponse:
             "root_cause_detection",
             "automated_verification",
             "automatic_retry_logic",
-            "multi_ai_fallback"
+            "multi_ai_fallback",
+            *(["local_llm_support"] if ollama_available else [])
         ],
         retry_config={
             "enabled": True,
@@ -429,8 +414,8 @@ async def agent_health() -> AgentHealthResponse:
             "max_allowed_attempts": 5
         },
         ai_fallback_chain=[
-            "gpt-4o (primary)",
-            "gemini-1.5-pro (fallback)" if gemini_available else "manual guidance (fallback)"
+            f"{primary_agent} (primary)",
+            f"{secondary_agent} (secondary)" if secondary_agent else "manual guidance (fallback)"
         ]
     )
 
@@ -544,9 +529,9 @@ async def verify_bug_fix(bug_id: str, request: VerifyFixRequest, db: Session = D
 
 
 @router.post("/test-connection", response_model=ConnectionTestResponse)
-async def test_openai_connection(api_key: Optional[str] = None) -> ConnectionTestResponse:
+async def test_agent_connection(api_key: Optional[str] = None) -> ConnectionTestResponse:
     """
-    Test the OpenAI API connection.
+    Test the connection to the configured primary AI agent.
     
     Args:
         api_key: Optional API key to test (uses env if not provided)
@@ -554,28 +539,33 @@ async def test_openai_connection(api_key: Optional[str] = None) -> ConnectionTes
     Returns:
         Connection test results
     """
-    test_key = api_key or os.getenv("OPENAI_API_KEY")
-    
-    if not test_key:
-        return ConnectionTestResponse(
-            success=False,
-            error="No API key provided"
-        )
-    
     try:
         # Simple test with a minimal agent
-        agent = BugExorcistAgent(bug_id="test", openai_api_key=test_key)
+        agent = BugExorcistAgent(bug_id="test", openai_api_key=api_key)
         
+        # Validate that the primary provider is actually configured
+        # This prevents false-positives where the agent might fallback to a secondary provider
+        if agent.primary_provider is None:
+            primary_agent = os.getenv("PRIMARY_AGENT", "gpt-4o")
+            return ConnectionTestResponse(
+                success=False,
+                message=f"Primary provider '{primary_agent}' is not configured or missing API key.",
+                error="Configuration Error"
+            )
+            
         # Try a simple analysis
         test_result = await agent.analyze_error(
             error_message="Test error",
             code_snippet="print('test')"
         )
         
+        # Report the actual model used for the test
+        actual_model = test_result.get('ai_agent', 'unknown')
+        
         return ConnectionTestResponse(
             success=True,
-            message="OpenAI connection successful",
-            model="gpt-4o",
+            message=f"Connection to {actual_model} successful",
+            model=actual_model,
             test_confidence=test_result.get('confidence', 0.0),
             retry_enabled=True
         )

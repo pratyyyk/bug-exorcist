@@ -205,20 +205,9 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str) -> Non
             # Create session for tracking
             crud.create_session(db=db, session_id=session_id, bug_report_id=bug_report.id)
             
-            # Get API key
-            api_key = os.getenv("OPENAI_API_KEY")
-            if not api_key:
-                await websocket.send_json({
-                    "type": "error",
-                    "timestamp": __import__('datetime').datetime.now().isoformat(),
-                    "message": "OpenAI API key not configured",
-                    "stage": "initialization"
-                })
-                await websocket.close()
-                return
-            
             # Initialize agent with streaming capability
-            agent = BugExorcistAgent(bug_id=bug_id, openai_api_key=api_key)
+            # Note: API keys are now handled inside the agent based on configuration
+            agent = BugExorcistAgent(bug_id=bug_id)
             
             # Stream the thought process
             total_prompt_tokens = 0
@@ -294,12 +283,12 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str) -> Non
                 "message": "Internal server error. Please try again later.",
                 "stage": "error"
             })
-        except:
+        except Exception:
             pass
     finally:
         try:
             await websocket.close()
-        except:
+        except Exception:
             pass
 
 

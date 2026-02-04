@@ -21,5 +21,5 @@ async def websocket_endpoint(websocket: WebSocket, bug_id: str) -> None:
         # Ensure the connection is closed
         try:
             await websocket.close()
-        except:
+        except Exception:
             pass
