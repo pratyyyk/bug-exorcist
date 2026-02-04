@@ -543,18 +543,29 @@ async def test_agent_connection(api_key: Optional[str] = None) -> ConnectionTest
         # Simple test with a minimal agent
         agent = BugExorcistAgent(bug_id="test", openai_api_key=api_key)
         
+        # Validate that the primary provider is actually configured
+        # This prevents false-positives where the agent might fallback to a secondary provider
+        if agent.primary_provider is None:
+            primary_agent = os.getenv("PRIMARY_AGENT", "gpt-4o")
+            return ConnectionTestResponse(
+                success=False,
+                message=f"Primary provider '{primary_agent}' is not configured or missing API key.",
+                error="Configuration Error"
+            )
+            
         # Try a simple analysis
         test_result = await agent.analyze_error(
             error_message="Test error",
             code_snippet="print('test')"
         )
         
-        primary_agent = os.getenv("PRIMARY_AGENT", "gpt-4o")
+        # Report the actual model used for the test
+        actual_model = test_result.get('ai_agent', 'unknown')
         
         return ConnectionTestResponse(
             success=True,
-            message=f"Connection to {primary_agent} successful",
-            model=primary_agent,
+            message=f"Connection to {actual_model} successful",
+            model=actual_model,
             test_confidence=test_result.get('confidence', 0.0),
             retry_enabled=True
         )
