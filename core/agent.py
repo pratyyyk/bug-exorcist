@@ -735,6 +735,11 @@ Please provide:
             }
             
         except Exception as e:
+            # Log the full internal error details for debugging
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"AI analysis internal error: {str(e)}", exc_info=True)
+            
             # If primary fails and we have a secondary, try secondary
             if not use_secondary and self.secondary_provider:
                 return await self.analyze_error(
@@ -746,7 +751,8 @@ Please provide:
                     use_secondary=True
                 )
             
-            raise Exception(f"AI analysis failed: {str(e)}")
+            # Provide a user-friendly error message without leaking internal details
+            raise Exception("AI analysis failed due to an internal provider error. Please check server logs for details.")
 
     def _parse_ai_response(self, ai_response: str, original_code: str) -> Dict[str, Any]:
         """
