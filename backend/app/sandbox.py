@@ -22,16 +22,17 @@ class Sandbox:
             nano_cpus = 500_000_000
             
             # Map language to execution command
+            # Using /bin/sh -c to support shell features like &&, pipes, and redirects
             commands = {
-                "python": "python3 -c \"import sys; exec(sys.stdin.read())\"",
-                "javascript": "node -e \"$(cat)\"",
-                "nodejs": "node -e \"$(cat)\"",
-                "go": "cat > main.go && go run main.go",
-                "go-test": "go test ./...",
-                "rust": "cat > main.rs && rustc main.rs -o main && ./main",
-                "cargo-test": "cargo test",
-                "npm-test": "npm test",
-                "bash": "/bin/bash"
+                "python": ["/bin/sh", "-c", "python3 -c \"import sys; exec(sys.stdin.read())\""],
+                "javascript": ["/bin/sh", "-c", "node -e \"$(cat)\""],
+                "nodejs": ["/bin/sh", "-c", "node -e \"$(cat)\""],
+                "go": ["/bin/sh", "-c", "cat > main.go && go run main.go"],
+                "go-test": ["/bin/sh", "-c", "cat > main_test.go && go test -v"],
+                "rust": ["/bin/sh", "-c", "cat > main.rs && rustc main.rs -o main && ./main"],
+                "cargo-test": ["/bin/sh", "-c", "cargo test"],
+                "npm-test": ["/bin/sh", "-c", "cat > test.js && npm test -- --test-file=test.js"],
+                "bash": ["/bin/bash", "-c", "$(cat)"]
             }
             
             command = commands.get(language.lower(), commands["python"])

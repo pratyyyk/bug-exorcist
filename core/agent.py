@@ -13,6 +13,7 @@ to eliminate duplication between analyze_and_fix_with_retry and stream_thought_p
 """
 
 import os
+import re
 from datetime import datetime
 from typing import Dict, Optional, Any, List, AsyncGenerator, Callable, Awaitable
 from langchain_openai import ChatOpenAI
@@ -628,6 +629,9 @@ Be systematic, thorough, and learn from failures."""
         """
         Analyze an error and generate a fix using AI.
         """
+        # Sanitize language for prompt safety
+        safe_language = re.sub(r'[^a-zA-Z0-9\-]', '', language).strip() or "python"
+        
         attempt_number = len(previous_attempts) + 1 if previous_attempts else 1
         
         # Determine which provider to use
@@ -644,7 +648,7 @@ Be systematic, thorough, and learn from failures."""
         # Construct the analysis prompt
         user_prompt = f"""Analyze and fix this bug:
 
-**Language:** {language}
+**Language:** {safe_language}
 
 **Error Message:**
 ```
@@ -652,7 +656,7 @@ Be systematic, thorough, and learn from failures."""
 ```
 
 **Original Code:**
-```{language}
+```{safe_language}
 {code_snippet}
 ```
 """
@@ -763,7 +767,8 @@ Please provide:
                     file_path=file_path,
                     additional_context=additional_context,
                     previous_attempts=previous_attempts,
-                    use_secondary=True
+                    use_secondary=True,
+                    language=language
                 )
             
             # Provide a user-friendly error message without leaking internal details
@@ -953,20 +958,21 @@ Please provide:
 
 
 # Convenience functions for quick usage
-async def quick_fix(error: str, code: str, api_key: Optional[str] = None) -> str:
+async def quick_fix(error: str, code: str, language: str = "python", api_key: Optional[str] = None) -> str:
     """
     Quick fix - returns only the fixed code without full analysis.
     
     Args:
         error: Error message
         code: Problematic code
+        language: The programming language of the code
         api_key: Optional OpenAI API key
         
     Returns:
         Fixed code as string
     """
     agent = BugExorcistAgent(bug_id="quick-fix", openai_api_key=api_key)
-    result = await agent.analyze_error(error, code)
+    result = await agent.analyze_error(error, code, language=language)
     return result['fixed_code']
 
 
@@ -974,6 +980,7 @@ async def fix_with_retry(
     error: str,
     code: str,
     max_attempts: int = 3,
+    language: str = "python",
     api_key: Optional[str] = None
 ) -> Dict[str, Any]:
     """
@@ -983,6 +990,7 @@ async def fix_with_retry(
         error: Error message
         code: Problematic code
         max_attempts: Maximum retry attempts
+        language: The programming language of the code
         api_key: Optional OpenAI API key
         
     Returns:
@@ -992,5 +1000,6 @@ async def fix_with_retry(
     return await agent.analyze_and_fix_with_retry(
         error_message=error,
         code_snippet=code,
-        max_attempts=max_attempts
+        max_attempts=max_attempts,
+        language=language
     )

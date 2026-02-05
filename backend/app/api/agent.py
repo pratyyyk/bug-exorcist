@@ -6,7 +6,7 @@ Enhanced with automatic retry logic for failed fixes.
 """
 
 from fastapi import APIRouter, HTTPException, Depends
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, validator
 from typing import Optional, Dict, Any, List, Generator
 from sqlalchemy.orm import Session
 import os
@@ -28,10 +28,16 @@ class BugAnalysisRequest(BaseModel):
     error_message: str = Field(..., description="The error message with stack trace")
     code_snippet: str = Field(..., description="The code that caused the error")
     file_path: Optional[str] = Field(None, description="Path to the file containing the bug")
+    language: str = Field("python", description="The programming language of the code")
     additional_context: Optional[str] = Field(None, description="Additional context about the bug")
     openai_api_key: Optional[str] = Field(None, description="OpenAI API key (optional, uses env if not provided)")
     use_retry: bool = Field(True, description="Enable automatic retry logic (default: True)")
     max_attempts: int = Field(3, description="Maximum retry attempts (default: 3, max: 5)", ge=1, le=5)
+
+    @validator("language")
+    def validate_language(cls, v):
+        from app.main import sanitize_language
+        return sanitize_language(v)
 
     class Config:
         json_schema_extra = {
@@ -39,6 +45,7 @@ class BugAnalysisRequest(BaseModel):
                 "error_message": "ZeroDivisionError: division by zero\n  File 'calc.py', line 10",
                 "code_snippet": "def divide(a, b):\n    return a / b",
                 "file_path": "calc.py",
+                "language": "python",
                 "additional_context": "This function is called from the API endpoint",
                 "use_retry": True,
                 "max_attempts": 3
@@ -54,6 +61,7 @@ class BugAnalysisResponse(BaseModel):
     explanation: str
     confidence: float
     original_error: str
+    language: str = "python"
     timestamp: str
     attempt_number: Optional[int] = 1
     usage: Optional[Dict[str, Any]] = None
@@ -64,9 +72,15 @@ class RetryFixRequest(BaseModel):
     error_message: str
     code_snippet: str
     file_path: Optional[str] = None
+    language: str = Field("python", description="The programming language of the code")
     additional_context: Optional[str] = None
     openai_api_key: Optional[str] = None
     max_attempts: int = Field(3, ge=1, le=5)
+
+    @validator("language")
+    def validate_language(cls, v):
+        from app.main import sanitize_language
+        return sanitize_language(v)
 
 
 class RetryFixResponse(BaseModel):
@@ -76,19 +90,32 @@ class RetryFixResponse(BaseModel):
     all_attempts: List[Dict[str, Any]]
     total_attempts: int
     message: str
+    language: str = "python"
     last_error: Optional[str] = None
 
 
 class VerifyFixRequest(BaseModel):
     """Request model for bug fix verification"""
     fixed_code: str = Field(..., description="The fixed code to verify")
+    language: str = Field("python", description="The programming language of the code")
+
+    @validator("language")
+    def validate_language(cls, v):
+        from app.main import sanitize_language
+        return sanitize_language(v)
 
 
 class QuickFixRequest(BaseModel):
     """Request model for quick fix"""
     error: str
     code: str
+    language: str = Field("python", description="The programming language of the code")
     openai_api_key: Optional[str] = None
+
+    @validator("language")
+    def validate_language(cls, v):
+        from app.main import sanitize_language
+        return sanitize_language(v)
 
 
 class QuickFixResponse(BaseModel):
@@ -182,7 +209,8 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
                 code_snippet=request.code_snippet,
                 file_path=request.file_path,
                 additional_context=request.additional_context,
-                max_attempts=request.max_attempts
+                max_attempts=request.max_attempts,
+                language=request.language
             )
             
             # Accumulate usage from all attempts
@@ -218,6 +246,7 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
                     explanation=final_fix['explanation'],
                     confidence=final_fix['confidence'],
                     original_error=request.error_message,
+                    language=request.language,
                     timestamp=final_fix['timestamp'],
                     attempt_number=retry_result['total_attempts'],
                     usage={
@@ -254,7 +283,8 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
                 error_message=request.error_message,
                 code_snippet=request.code_snippet,
                 file_path=request.file_path,
-                additional_context=request.additional_context
+                additional_context=request.additional_context,
+                language=request.language
             )
             
             # Update session usage in DB
@@ -277,6 +307,7 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
                 explanation=result['explanation'],
                 confidence=result['confidence'],
                 original_error=request.error_message,
+                language=request.language,
                 timestamp=result['timestamp'],
                 usage={
                     **usage,
@@ -324,7 +355,8 @@ async def fix_bug_with_retry(request: RetryFixRequest, db: Session = Depends(get
             code_snippet=request.code_snippet,
             file_path=request.file_path,
             additional_context=request.additional_context,
-            max_attempts=request.max_attempts
+            max_attempts=request.max_attempts,
+            language=request.language
         )
         
         # Update database status
@@ -333,7 +365,7 @@ async def fix_bug_with_retry(request: RetryFixRequest, db: Session = Depends(get
         else:
             crud.update_bug_report_status(db=db, bug_report_id=bug_report.id, status="failed")
         
-        return RetryFixResponse(**result)
+        return RetryFixResponse(language=request.language, **result)
         
     except Exception as e:
         logger.exception(f"Retry fix failed for {bug_id if 'bug_id' in locals() else 'unknown'}")
@@ -358,6 +390,7 @@ async def quick_fix_endpoint(request: QuickFixRequest) -> QuickFixResponse:
         fixed = await quick_fix(
             error=request.error,
             code=request.code,
+            language=request.language,
             api_key=request.openai_api_key
         )
         
@@ -517,7 +550,7 @@ async def verify_bug_fix(bug_id: str, request: VerifyFixRequest, db: Session = D
     agent = BugExorcistAgent(bug_id=f"BUG-{numeric_id}")
     
     # Verify the fix
-    verification = await agent.verify_fix(request.fixed_code)
+    verification = await agent.verify_fix(request.fixed_code, language=request.language)
     
     # Update status if verified
     if verification['verified']:

@@ -108,7 +108,8 @@ npm install
 npm run dev
 ```
 4. Run with Docker
-```
+```bash
+# This builds the backend, frontend, and the sandbox image
 docker-compose up --build
 ```
 

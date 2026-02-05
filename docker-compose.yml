@@ -18,6 +18,14 @@ services:
       - "host.docker.internal:host-gateway"
     restart: always
 
+  sandbox:
+    image: bug-exorcist-sandbox:latest
+    build:
+      context: .
+      dockerfile: sandbox.Dockerfile
+    # This service doesn't need to run, just be built
+    command: ["echo", "Sandbox image built"]
+
   frontend:
     build:
       context: ./frontend

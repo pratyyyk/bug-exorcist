@@ -9,7 +9,7 @@ import json
 import logging
 import re
 import datetime
-from typing import Dict, Any
+from typing import Dict, Any, List
 from dotenv import load_dotenv
 
 # NEW: Structured JSON Logging Formatter
@@ -28,11 +28,36 @@ class JsonFormatter(logging.Formatter):
 # Configure logging
 handler = logging.StreamHandler()
 handler.setFormatter(JsonFormatter())
-logging.basicConfig(
-    level=logging.INFO,
-    handlers=[handler]
-)
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("bug-exorcist-backend")
+logger.addHandler(handler)
+logger.setLevel(logging.INFO)
+
+# Valid supported languages
+SUPPORTED_LANGUAGES = ["python", "javascript", "nodejs", "go", "rust", "bash", "go-test", "cargo-test", "npm-test"]
+
+def sanitize_language(lang: str) -> str:
+    """Sanitize and validate language input."""
+    if not lang or not isinstance(lang, str):
+        return "python"
+    
+    # Normalize: lowercase, strip, and remove any non-alphanumeric chars (except hyphens)
+    clean_lang = re.sub(r'[^a-zA-Z0-9\-]', '', lang.lower().strip())
+    
+    # Check against supported list
+    if clean_lang in SUPPORTED_LANGUAGES:
+        return clean_lang
+    
+    # Specific mappings for common variations
+    if clean_lang in ["js", "javascript"] or "javascript" in clean_lang: return "javascript"
+    if clean_lang in ["node", "nodejs"] or "node" in clean_lang: return "nodejs"
+    if clean_lang in ["golang", "go"] or "go" in clean_lang: return "go"
+    if clean_lang in ["sh", "bash", "shell"] or "bash" in clean_lang: return "bash"
+    if "npm" in clean_lang and "test" in clean_lang: return "npm-test"
+    if "go" in clean_lang and "test" in clean_lang: return "go-test"
+    if "cargo" in clean_lang and "test" in clean_lang: return "cargo-test"
+    
+    # Default to python if unknown or potentially dangerous
+    return "python"
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -162,7 +187,7 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str) -> Non
         additional_context = request_data.get("additional_context")
         use_retry = request_data.get("use_retry", True)
         max_attempts = request_data.get("max_attempts", 3)
-        language = request_data.get("language", "python")
+        language = sanitize_language(request_data.get("language", "python"))
         
         # Validate required fields
         if not error_message or not code_snippet:
@@ -205,6 +230,11 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str) -> Non
             
             # Create session for tracking
             crud.create_session(db=db, session_id=session_id, bug_report_id=bug_report.id)
+            
+            # Initialize usage tracking
+            total_prompt_tokens = 0
+            total_completion_tokens = 0
+            total_cost = 0.0
             
             # Initialize agent with streaming capability
             agent = BugExorcistAgent(bug_id=bug_id)
