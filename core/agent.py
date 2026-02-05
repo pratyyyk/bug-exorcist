@@ -899,8 +899,8 @@ Please provide:
         """Verify the fix in the sandbox."""
         # Real verification logic with robust exception handling
         try:
-            from app.sandbox import Sandbox
-            sandbox = Sandbox()
+            # Use the existing sandbox instance
+            sandbox = self.sandbox
             result = sandbox.run_code(fixed_code, language)
             
             # Check if Mock Sandbox is being used
