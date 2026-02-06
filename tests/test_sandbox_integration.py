@@ -1,4 +1,5 @@
 import unittest
+import asyncio
 from unittest.mock import MagicMock, patch
 from app.sandbox import Sandbox
 
@@ -11,7 +12,7 @@ class TestSandboxIntegration(unittest.TestCase):
 
     def test_npm_test_command(self):
         code = "const assert = require('assert'); it('works', () => assert(true));"
-        self.sandbox.run_code(code, language="npm-test")
+        asyncio.run(self.sandbox.run_code(code, language="npm-test"))
         
         # Verify docker run was called with the correct command
         args, kwargs = self.mock_docker.containers.run.call_args
@@ -20,7 +21,7 @@ class TestSandboxIntegration(unittest.TestCase):
 
     def test_go_test_command(self):
         code = "package main; import \"testing\"; func TestPass(t *testing.T) {}"
-        self.sandbox.run_code(code, language="go-test")
+        asyncio.run(self.sandbox.run_code(code, language="go-test"))
         
         # Verify docker run was called with the correct command
         args, kwargs = self.mock_docker.containers.run.call_args
@@ -31,7 +32,7 @@ class TestSandboxIntegration(unittest.TestCase):
         # Even with shell support, the language itself is sanitized before reaching Sandbox
         # But we test that Sandbox handles the commands correctly as lists
         code = "echo hello"
-        self.sandbox.run_code(code, language="bash")
+        asyncio.run(self.sandbox.run_code(code, language="bash"))
         
         args, kwargs = self.mock_docker.containers.run.call_args
         self.assertEqual(kwargs['command'], ["/bin/bash", "-c", "$(cat)"])

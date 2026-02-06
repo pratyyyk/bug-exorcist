@@ -25,3 +25,4 @@ GitPython
 
 # Additional utilities
 python-dotenv
+PyYAML

@@ -1,4 +1,5 @@
 import unittest
+import asyncio
 from app.sandbox import Sandbox
 import docker
 
@@ -15,14 +16,14 @@ class TestSandboxShell(unittest.TestCase):
     def test_shell_features(self):
         # Test && and pipes
         code = "echo 'hello' && echo 'world' | rev"
-        result = self.sandbox.run_code(code, language="bash")
+        result = asyncio.run(self.sandbox.run_code(code, language="bash"))
         self.assertIn("hello", result)
         self.assertIn("dlrow", result)
 
     def test_python_with_shell(self):
         # Even python should run through shell now
         code = "print('hello' + ' ' + 'world')"
-        result = self.sandbox.run_code(code, language="python")
+        result = asyncio.run(self.sandbox.run_code(code, language="python"))
         self.assertEqual(result.strip(), "hello world")
 
 if __name__ == "__main__":

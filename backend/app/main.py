@@ -15,32 +15,33 @@ from pathlib import Path
 from dotenv import load_dotenv
 
 # Path validation helper
-def validate_paths(repo_path: Optional[str], file_path: Optional[str] = None) -> bool:
+def validate_paths(repo_path: Optional[str], file_path: Optional[str] = None, project_path: Optional[str] = None) -> bool:
     """
-    Validates that repo_path and file_path are safe and authorized.
+    Validates that repo_path, file_path, and project_path are safe and authorized.
     """
-    if not repo_path:
-        return True # repo_path is optional for some flows
-        
     try:
-        repo_dir = Path(repo_path).resolve()
-        
-        # Check if it's a directory
-        if not repo_dir.is_dir():
-            return False
-            
-        # Optional: Restrict to a specific root if defined in env
-        allowed_root = os.getenv("ALLOWED_REPO_ROOT")
-        if allowed_root:
-            root_dir = Path(allowed_root).resolve()
-            if root_dir not in repo_dir.parents and root_dir != repo_dir:
+        allowed_root_env = os.getenv("ALLOWED_REPO_ROOT")
+        root_dir = Path(allowed_root_env).resolve() if allowed_root_env else None
+
+        if repo_path:
+            repo_dir = Path(repo_path).resolve()
+            if not repo_dir.is_dir():
                 return False
-        
-        if file_path:
-            # Join and resolve to catch traversal
-            target_file = (repo_dir / file_path).resolve()
-            # Check if target_file is within repo_dir
-            if repo_dir not in target_file.parents and repo_dir != target_file:
+            
+            if root_dir and root_dir not in repo_dir.parents and root_dir != repo_dir:
+                return False
+                
+            if file_path:
+                target_file = (repo_dir / file_path).resolve()
+                if repo_dir not in target_file.parents and repo_dir != target_file:
+                    return False
+
+        if project_path:
+            proj_dir = Path(project_path).resolve()
+            if not proj_dir.is_dir():
+                return False
+            
+            if root_dir and root_dir not in proj_dir.parents and root_dir != proj_dir:
                 return False
                 
         return True
@@ -254,13 +255,14 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str) -> Non
         code_snippet = request_data.get("code_snippet", "")
         file_path = request_data.get("file_path")
         repo_path = request_data.get("repo_path") # Optional: used for git operations
+        project_path = request_data.get("project_path", repo_path or ".")
         
         # Security: Validate paths to prevent traversal
-        if not validate_paths(repo_path, file_path):
+        if not validate_paths(repo_path, file_path, project_path):
             await websocket.send_json({
                 "type": "error",
                 "timestamp": __import__('datetime').datetime.now().isoformat(),
-                "message": "Invalid or unauthorized repository/file path.",
+                "message": "Invalid or unauthorized repository/file/project path.",
                 "stage": "initialization"
             })
             await websocket.close()
@@ -320,7 +322,7 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str) -> Non
             total_cost = 0.0
             
             # Initialize agent with streaming capability
-            agent = BugExorcistAgent(bug_id=bug_id)
+            agent = BugExorcistAgent(bug_id=bug_id, project_path=project_path)
             
             # Start thought stream
             last_result = None

@@ -14,6 +14,7 @@ to eliminate duplication between analyze_and_fix_with_retry and stream_thought_p
 
 import os
 import re
+import asyncio
 from datetime import datetime
 from typing import Dict, Optional, Any, List, AsyncGenerator, Callable, Awaitable
 from langchain_openai import ChatOpenAI
@@ -88,15 +89,17 @@ Provide:
 
 Be systematic, thorough, and learn from failures."""
 
-    def __init__(self, bug_id: str, openai_api_key: Optional[str] = None):
+    def __init__(self, bug_id: str, openai_api_key: Optional[str] = None, project_path: str = "."):
         """
         Initialize the Bug Exorcist Agent.
         
         Args:
             bug_id: Unique identifier for this bug
             openai_api_key: OpenAI API key (uses env var if not provided)
+            project_path: Path to the project root
         """
         self.bug_id = bug_id
+        self.project_path = project_path
         
         # Configuration for agents
         self.primary_agent_type = os.getenv("PRIMARY_AGENT", "gpt-4o").lower()
@@ -112,7 +115,10 @@ Be systematic, thorough, and learn from failures."""
         
         # Initialize sandbox
         from app.sandbox import Sandbox
-        self.sandbox = Sandbox()
+        self.sandbox = Sandbox(project_path=project_path)
+        
+        # Initialize log queue for async log streaming
+        self._temp_log_queue = asyncio.Queue()
 
     def _init_provider(self, agent_type: str, api_key: Optional[str] = None) -> Any:
         """Initialize a specific AI provider based on type."""
@@ -170,6 +176,12 @@ Be systematic, thorough, and learn from failures."""
         all_attempts = []
         final_result = None
         
+        # NEW: Ensure sandbox is provisioned before first attempt in non-streaming context
+        if not on_attempt_start:
+            # Running in silent/REST mode, build image without callback if needed
+            # We can't easily await here if the caller didn't, but _execute_retry_logic is async
+            await self.sandbox.build_image()
+
         for attempt_num in range(1, max_attempts + 1):
             # Determine which AI to use
             # Attempt 1: Primary
@@ -406,6 +418,54 @@ Be systematic, thorough, and learn from failures."""
             yield emit_thought(
                 "Preparing sandbox environment...",
                 "initialization"
+            )
+
+            # NEW: Dynamic Sandbox Provisioning
+            yield emit_status("🏗️ Building dynamic sandbox environment...", "provisioning")
+            
+            # Start the build in a task
+            async def wrapped_log_callback(msg):
+                self._temp_log_queue.put_nowait(msg)
+
+            build_task = asyncio.create_task(self.sandbox.build_image(
+                log_callback=wrapped_log_callback
+            ))
+            
+            # While the build is running, flush logs
+            while not build_task.done():
+                while not self._temp_log_queue.empty():
+                    log_data = self._temp_log_queue.get_nowait()
+                    if isinstance(log_data, dict):
+                        yield emit_thought(
+                            log_data.get("message", ""), 
+                            "provisioning", 
+                            {"image": log_data.get("image")}
+                        )
+                    else:
+                        yield emit_thought(log_data, "provisioning")
+                await asyncio.sleep(0.1) # Small delay to prevent busy waiting
+                
+            # Final flush
+            await build_task # Ensure it's finished and raise any errors
+            while not self._temp_log_queue.empty():
+                log_data = self._temp_log_queue.get_nowait()
+                if isinstance(log_data, dict):
+                    yield emit_thought(
+                        log_data.get("message", ""), 
+                        "provisioning", 
+                        {"image": log_data.get("image")}
+                    )
+                else:
+                    yield emit_thought(log_data, "provisioning")
+            
+            # NEW: Run environment diagnostics after build
+            yield emit_status("🔍 Running environment diagnostics...", "provisioning")
+            diagnostics = await self.sandbox.get_diagnostics()
+            yield emit_thought(
+                f"Environment Ready. Python: {diagnostics['env'].get('PYTHON_VER', 'Unknown')}, "
+                f"Disk Free: {diagnostics['env'].get('DISK_FREE', 'Unknown')}",
+                "provisioning",
+                {"diagnostics": diagnostics}
             )
             
             yield emit_thought(
@@ -901,7 +961,7 @@ Please provide:
         try:
             # Use the existing sandbox instance
             sandbox = self.sandbox
-            result = sandbox.run_code(fixed_code, language)
+            result = await sandbox.run_code(fixed_code, language)
             
             # Check if Mock Sandbox is being used
             if getattr(sandbox, "use_mock", False):
@@ -981,14 +1041,24 @@ Please provide:
         """
         Stream log messages for WebSocket consumption.
         
-        This is a placeholder for backward compatibility.
-        Use stream_thought_process for detailed event streaming.
-        
-        Yields:
-            Log message strings
+        This method streams both general agent logs and Docker build logs.
         """
-        yield f"[{datetime.now().isoformat()}] Bug Exorcist Agent initialized for {self.bug_id}"
-        yield f"[{datetime.now().isoformat()}] Use stream_thought_process for detailed event streaming"
+        yield f"[{datetime.now().isoformat()}] 🧟‍♂️ Bug Exorcist Agent initialized for {self.bug_id}"
+        
+        # Stream from the temp log queue if it has anything (like build logs)
+        while True:
+            try:
+                # Use a small timeout to not block forever if no logs are coming
+                log_msg = await asyncio.wait_for(self._temp_log_queue.get(), timeout=1.0)
+                yield f"[{datetime.now().isoformat()}] {log_msg}"
+                self._temp_log_queue.task_done()
+            except asyncio.TimeoutError:
+                # No logs for now, check if we should continue
+                # For now, we'll just keep waiting or we could check a 'done' flag
+                break 
+            except Exception as e:
+                yield f"[{datetime.now().isoformat()}] Error streaming logs: {str(e)}"
+                break
 
 
 # Convenience functions for quick usage
