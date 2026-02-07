@@ -70,6 +70,52 @@ print("line 2")```
 
         print("✅ Parser with code fence inline verified successfully!")
 
+def test_parser_with_fixed_code_header_inline():
+    print("\n--- Testing Parser with Fixed Code Header Inline ---")
+
+    with patch('app.sandbox.Sandbox'):
+        agent = BugExorcistAgent(bug_id="test-parser")
+
+        ai_response = """
+Root Cause: Missing return statement.
+Fixed Code: return x + 1
+Explanation: Added a return statement.
+"""
+        result = agent._parse_ai_response(ai_response, "original code")
+        print(f"Fixed Code: {result['fixed_code']}")
+        assert "return x + 1" in result['fixed_code']
+
+        ai_response_2 = """
+Root Cause: Incorrect value.
+Fixed Code:
+return 42
+Explanation: Replaced with correct value.
+"""
+        result_2 = agent._parse_ai_response(ai_response_2, "original code")
+        print(f"Fixed Code 2: {result_2['fixed_code']}")
+        assert "return 42" in result_2['fixed_code']
+
+        print("✅ Parser with Fixed Code header inline verified successfully!")
+
+def test_parser_with_python3_inline_fence():
+    print("\n--- Testing Parser with python3 Inline Fence ---")
+
+    with patch('app.sandbox.Sandbox'):
+        agent = BugExorcistAgent(bug_id="test-parser")
+
+        ai_response = """
+Root Cause: Test
+```python3 print(123)
+```
+"""
+        result = agent._parse_ai_response(ai_response, "original code")
+        print(f"Fixed Code: {result['fixed_code']}")
+        assert "print(123)" in result['fixed_code']
+
+        print("✅ Parser with python3 inline fence verified successfully!")
+
 if __name__ == "__main__":
     test_parser_with_inline_content()
     test_parser_with_code_fence_inline()
+    test_parser_with_fixed_code_header_inline()
+    test_parser_with_python3_inline_fence()

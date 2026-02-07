@@ -1,0 +1,41 @@
+[tool.ruff]
+line-length = 127
+target-version = "py310"
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = []
+exclude = [
+  ".git",
+  ".venv",
+  "venv",
+  "env",
+  "node_modules",
+  ".next",
+  "frontend",
+  "backend/Lib",
+  "backend/Scripts",
+  "__pycache__",
+]
+
+[tool.black]
+line-length = 127
+target-version = ["py310"]
+exclude = '''
+/(
+  \.git
+  | \.venv
+  | venv
+  | env
+  | node_modules
+  | \.next
+  | frontend
+  | backend/Lib
+  | backend/Scripts
+  | __pycache__
+)/
+'''
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+disallow_untyped_defs = false
+exclude = "(frontend|backend/Lib|backend/Scripts|node_modules|\\.next|__pycache__|venv|env)"

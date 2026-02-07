@@ -13,6 +13,18 @@ env/
 # System
 .DS_Store
 
+# Test/Build artifacts
+.pytest_cache/
+.chroma_db/
+
+# Databases
+*.db
+*.sqlite
+*.sqlite3
+
+# Local tooling
+Scripts/
+
 # Backend Vendored
 /backend/Lib/
 /backend/Scripts/

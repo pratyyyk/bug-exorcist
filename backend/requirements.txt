@@ -1,33 +1,33 @@
 # Web Server (FastAPI)
-fastapi
-uvicorn[standard]
-pydantic
-websockets  # NEW: Required for WebSocket support
+fastapi==0.128.4
+uvicorn[standard]==0.39.0
+pydantic==2.12.5
+websockets==15.0.1  # Required for WebSocket support
 
-# AI & LLM - Updated for LangChain v0.1+
-langchain
-langchain-openai
-langchain-core
-langchain-google-genai
-langchain-ollama  # NEW: Local LLM support
-openai
-tiktoken
-google-generativeai
+# AI & LLM - LangChain stack
+langchain==0.3.27
+langchain-openai==0.3.35
+langchain-core==0.3.83
+langchain-google-genai==2.1.12
+langchain-ollama==0.3.10  # Local LLM support
+openai==2.17.0
+tiktoken==0.12.0
+google-generativeai==0.8.6
 
 # Sandbox Management (Docker SDK)
-docker
+docker==7.1.0
 
 # Database
-sqlalchemy
+sqlalchemy==2.0.46
 
 # Version Control
-GitPython
+GitPython==3.1.46
 
 # Vector Database & RAG
-chromadb
-langchain-community
+chromadb==1.4.1
+langchain-community==0.3.31
 
 # Additional utilities
-python-dotenv
-PyYAML
-requests
+python-dotenv==1.2.1
+PyYAML==6.0.3
+requests==2.32.5

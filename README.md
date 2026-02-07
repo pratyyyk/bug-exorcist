@@ -98,6 +98,19 @@ We welcome contributions from participants! To ensure a fair and organized workf
 
 * Docker Desktop
 
+### Environment Variables
+
+Set these in `.env` (see `.env.example`) or your shell:
+
+* `OPENAI_API_KEY` (required for GPT-4o)
+* `GEMINI_API_KEY` (optional fallback provider)
+* `ENABLE_RAG` (`true`/`false`) to enable codebase indexing
+* `ALLOWED_REPO_ROOT` (required in production when RAG is enabled)
+* `RAG_EMBEDDING_PROVIDER` (`openai` or `huggingface`)
+* `RAG_RETENTION_DAYS` (default: `30`)
+* `ENABLE_FALLBACK` (`true`/`false`) to enable manual guidance fallback
+* `ENABLE_GEMINI_FALLBACK` (`true`/`false`) to enable Gemini fallback
+
 ### Installation
 
 1. Clone the Repository
