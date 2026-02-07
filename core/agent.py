@@ -89,7 +89,7 @@ Provide:
 
 Be systematic, thorough, and learn from failures."""
 
-    def __init__(self, bug_id: str, openai_api_key: Optional[str] = None, project_path: str = "."):
+    def __init__(self, bug_id: str, openai_api_key: Optional[str] = None, project_path: str = ".", rag: Optional[Any] = None):
         """
         Initialize the Bug Exorcist Agent.
         
@@ -97,6 +97,7 @@ Be systematic, thorough, and learn from failures."""
             bug_id: Unique identifier for this bug
             openai_api_key: OpenAI API key (uses env var if not provided)
             project_path: Path to the project root
+            rag: Injected RAG engine instance
         """
         self.bug_id = bug_id
         self.project_path = project_path
@@ -119,6 +120,15 @@ Be systematic, thorough, and learn from failures."""
         
         # Initialize log queue for async log streaming
         self._temp_log_queue = asyncio.Queue()
+
+        # Use injected RAG or initialize if enabled
+        if rag:
+            self.rag = rag
+        elif os.getenv("ENABLE_RAG", "true").lower() == "true":
+            from core.rag_engine import CodebaseRAG
+            self.rag = CodebaseRAG(project_path=project_path)
+        else:
+            self.rag = None
 
     def _init_provider(self, agent_type: str, api_key: Optional[str] = None) -> Any:
         """Initialize a specific AI provider based on type."""
@@ -326,7 +336,8 @@ Be systematic, thorough, and learn from failures."""
         file_path: Optional[str] = None,
         additional_context: Optional[str] = None,
         max_attempts: int = 3,
-        language: str = "python"
+        language: str = "python",
+        session_id: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Analyze and fix a bug with automatic retry logic (REST API interface).
@@ -341,6 +352,7 @@ Be systematic, thorough, and learn from failures."""
             additional_context: Optional additional context about the bug
             max_attempts: Maximum retry attempts (default: 3, max: 5)
             language: The programming language of the code (default: "python")
+            session_id: Optional session ID for tracking
             
         Returns:
             Dictionary containing detailed results of all attempts:
@@ -372,7 +384,8 @@ Be systematic, thorough, and learn from failures."""
         additional_context: Optional[str] = None,
         use_retry: bool = True,
         max_attempts: int = 3,
-        language: str = "python"
+        language: str = "python",
+        session_id: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
         """
         Stream the agent's thought process in real-time (WebSocket interface).
@@ -380,6 +393,16 @@ Be systematic, thorough, and learn from failures."""
         This method uses the shared retry logic helper and emits thought events
         as the analysis progresses via callbacks.
         
+        Args:
+            error_message: The error message with stack trace
+            code_snippet: The code that caused the error
+            file_path: Optional path to the file containing the bug
+            additional_context: Optional additional context about the bug
+            use_retry: Whether to use retry logic
+            max_attempts: Maximum retry attempts
+            language: The programming language
+            session_id: Optional session ID for tracking
+            
         Yields:
             Dict containing:
             - type: "thought" | "status" | "result" | "error"
@@ -512,7 +535,8 @@ Be systematic, thorough, and learn from failures."""
                             "attempt": attempt_num,
                             "confidence": fix_result.get('confidence', 0),
                             "root_cause": fix_result.get('root_cause', '')[:200],
-                            "usage": fix_result.get('usage', {})
+                            "usage": fix_result.get('usage', {}),
+                            "referenced_files": fix_result.get('referenced_files', [])
                         }
                     )
                 
@@ -571,7 +595,8 @@ Be systematic, thorough, and learn from failures."""
                             "confidence": result['final_fix']['confidence'],
                             "attempts": result['total_attempts'],
                             "ai_model": result.get('ai_model', 'unknown'),
-                            "all_attempts": result['all_attempts']
+                            "all_attempts": result['all_attempts'],
+                            "referenced_files": result['final_fix'].get('referenced_files', [])
                         }
                     }
                 else:
@@ -622,12 +647,14 @@ Be systematic, thorough, and learn from failures."""
                     code_snippet=code_snippet,
                     file_path=file_path,
                     additional_context=additional_context,
-                    language=language
+                    language=language,
+                    session_id=session_id
                 )
                 
                 yield emit_status(
                     "AI analysis complete",
-                    "analysis"
+                    "analysis",
+                    {"referenced_files": fix_result.get('referenced_files', [])}
                 )
                 
                 yield emit_thought(
@@ -659,7 +686,8 @@ Be systematic, thorough, and learn from failures."""
                     "data": {
                         "success": verification['verified'],
                         "fix_result": fix_result,
-                        "verification": verification
+                        "verification": verification,
+                        "referenced_files": fix_result.get('referenced_files', [])
                     }
                 }
         
@@ -708,7 +736,8 @@ Be systematic, thorough, and learn from failures."""
                 "original_error": error_message,
                 "timestamp": datetime.now().isoformat(),
                 "attempt_number": len(previous_attempts or []) + 1,
-                "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150, "estimated_cost": 0.0, "model": provider.model_name}
+                "usage": {"prompt_tokens": 100, "completion_tokens": 50, "total_tokens": 150, "estimated_cost": 0.0, "model": provider.model_name},
+                "referenced_files": []
             }
 
         # Sanitize language for prompt safety
@@ -717,6 +746,15 @@ Be systematic, thorough, and learn from failures."""
         attempt_number = len(previous_attempts) + 1 if previous_attempts else 1
         
         # All analysis logic is now centralized here
+        # Get RAG context for the bug if RAG is enabled
+        rag_context = "RAG is disabled."
+        referenced_files = []
+        if self.rag:
+            rag_query = f"Fix {error_message} in {file_path if file_path else 'code'}: {code_snippet[:200]}"
+            rag_data = self.rag.get_context_summary(rag_query)
+            rag_context = rag_data["summary"]
+            referenced_files = rag_data["referenced_files"]
+
         # Construct the analysis prompt
         user_prompt = f"""Analyze and fix this bug:
 
@@ -731,6 +769,9 @@ Be systematic, thorough, and learn from failures."""
 ```{safe_language}
 {code_snippet}
 ```
+
+**Project Context (RAG):**
+{rag_context}
 """
         
         if file_path:
@@ -823,7 +864,8 @@ Please provide:
                     "total_tokens": prompt_tokens + completion_tokens,
                     "estimated_cost": estimated_cost,
                     "model": model_name
-                }
+                },
+                "referenced_files": referenced_files
             }
             
         except Exception as e:

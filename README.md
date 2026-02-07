@@ -14,6 +14,19 @@
 * **Frontend:** Next.js 14 (App Router), Tailwind CSS, Framer Motion
 * **Backend:** Python (FastAPI), LangChain
 * **Core Logic:** OpenAI GPT-4o + Docker SDK (Sandbox Management)
+* **RAG:** ChromaDB for codebase indexing and retrieval
+
+---
+
+## 🔒 Privacy & Security (RAG)
+
+The Retrieval-Augmented Generation (RAG) system indexes your codebase to provide context to the AI agent. To protect your data, the following security features are implemented:
+
+* **Configurable RAG:** Disable RAG entirely by setting `ENABLE_RAG=false` in your `.env`.
+* **Path Validation:** In production (`ENVIRONMENT=production`), the system requires `ALLOWED_REPO_ROOT` to be set. It will fail to process any paths outside this root.
+* **Sensitive File Filtering:** The indexer automatically skips sensitive files (e.g., `*secret*`, `*key*`, `.env`, `.pem`, `.crt`, `.db`).
+* **Local Embeddings:** You can use local embeddings instead of OpenAI by setting `RAG_EMBEDDING_PROVIDER=huggingface`. This prevents code snippets from being sent to OpenAI for embedding.
+* **Data Retention:** The vector database is automatically cleared if it's older than 30 days (configurable via `RAG_RETENTION_DAYS`).
 
 ---
 

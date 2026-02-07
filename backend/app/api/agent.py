@@ -5,7 +5,7 @@ This module provides REST API endpoints to interact with the autonomous debuggin
 Enhanced with automatic retry logic for failed fixes.
 """
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from pydantic import BaseModel, Field, validator
 from typing import Optional, Dict, Any, List, Generator
 from sqlalchemy.orm import Session
@@ -73,6 +73,7 @@ class BugAnalysisResponse(BaseModel):
     timestamp: str
     attempt_number: Optional[int] = 1
     usage: Optional[Dict[str, Any]] = None
+    referenced_files: Optional[List[str]] = []
 
 
 class RetryFixRequest(BaseModel):
@@ -190,7 +191,7 @@ def get_db() -> Generator[Session, None, None]:
 
 
 @router.post("/analyze", response_model=BugAnalysisResponse)
-async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)) -> BugAnalysisResponse:
+async def analyze_bug(request_body: BugAnalysisRequest, request: Request, db: Session = Depends(get_db)) -> BugAnalysisResponse:
     """
     Analyze a bug and generate a fix using the configured AI agent.
     """
@@ -198,7 +199,7 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
         # Create bug report in database
         bug_report = crud.create_bug_report(
             db=db,
-            description=f"{request.error_message[:200]}..."
+            description=f"{request_body.error_message[:200]}..."
         )
         bug_id = f"BUG-{bug_report.id}"
         
@@ -207,22 +208,26 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
         session_id = str(uuid.uuid4())
         crud.create_session(db=db, session_id=session_id, bug_report_id=bug_report.id)
         
+        # Get RAG instance from app state
+        rag = getattr(request.app.state, "rag", None)
+
         # Initialize agent
         agent = BugExorcistAgent(
             bug_id=bug_id, 
-            openai_api_key=request.openai_api_key,
-            project_path=request.project_path or "."
+            openai_api_key=request_body.openai_api_key,
+            project_path=request_body.project_path or ".",
+            rag=rag
         )
         
-        if request.use_retry:
+        if request_body.use_retry:
             # Use retry logic
             retry_result = await agent.analyze_and_fix_with_retry(
-                error_message=request.error_message,
-                code_snippet=request.code_snippet,
-                file_path=request.file_path,
-                additional_context=request.additional_context,
-                max_attempts=request.max_attempts,
-                language=request.language
+                error_message=request_body.error_message,
+                code_snippet=request_body.code_snippet,
+                file_path=request_body.file_path,
+                additional_context=request_body.additional_context,
+                max_attempts=request_body.max_attempts,
+                language=request_body.language
             )
             
             # Accumulate usage from all attempts
@@ -251,14 +256,18 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
                 crud.update_bug_report_status(db=db, bug_report_id=bug_report.id, status="fixed")
                 final_fix = retry_result['final_fix']
                 
+                # Update referenced files in DB
+                if final_fix.get('referenced_files'):
+                    crud.update_session_referenced_files(db=db, session_id=session_id, files=final_fix['referenced_files'])
+                
                 return BugAnalysisResponse(
                     bug_id=bug_id,
                     root_cause=final_fix['root_cause'],
                     fixed_code=final_fix['fixed_code'],
                     explanation=final_fix['explanation'],
                     confidence=final_fix['confidence'],
-                    original_error=request.error_message,
-                    language=request.language,
+                    original_error=request_body.error_message,
+                    language=request_body.language,
                     timestamp=final_fix['timestamp'],
                     attempt_number=retry_result['total_attempts'],
                     usage={
@@ -267,7 +276,8 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
                         "total_tokens": total_prompt_tokens + total_completion_tokens,
                         "estimated_cost": f"{total_cost:.6f}",
                         "session_id": session_id
-                    }
+                    },
+                    referenced_files=final_fix.get('referenced_files', [])
                 )
             else:
                 crud.update_bug_report_status(db=db, bug_report_id=bug_report.id, status="failed")
@@ -292,11 +302,11 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
         else:
             # Single attempt (original behavior)
             result = await agent.analyze_error(
-                error_message=request.error_message,
-                code_snippet=request.code_snippet,
-                file_path=request.file_path,
-                additional_context=request.additional_context,
-                language=request.language
+                error_message=request_body.error_message,
+                code_snippet=request_body.code_snippet,
+                file_path=request_body.file_path,
+                additional_context=request_body.additional_context,
+                language=request_body.language
             )
             
             # Update session usage in DB
@@ -312,19 +322,24 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
             # Update bug report status
             crud.update_bug_report_status(db=db, bug_report_id=bug_report.id, status="analyzed")
             
+            # Update referenced files in DB
+            if result.get('referenced_files'):
+                crud.update_session_referenced_files(db=db, session_id=session_id, files=result['referenced_files'])
+            
             return BugAnalysisResponse(
                 bug_id=bug_id,
                 root_cause=result['root_cause'],
                 fixed_code=result['fixed_code'],
                 explanation=result['explanation'],
                 confidence=result['confidence'],
-                original_error=request.error_message,
-                language=request.language,
+                original_error=request_body.error_message,
+                language=request_body.language,
                 timestamp=result['timestamp'],
                 usage={
                     **usage,
                     "session_id": session_id
-                }
+                },
+                referenced_files=result.get('referenced_files', [])
             )
         
     except HTTPException:
@@ -335,44 +350,35 @@ async def analyze_bug(request: BugAnalysisRequest, db: Session = Depends(get_db)
 
 
 @router.post("/fix-with-retry", response_model=RetryFixResponse)
-async def fix_bug_with_retry(request: RetryFixRequest, db: Session = Depends(get_db)) -> RetryFixResponse:
+async def fix_bug_with_retry(request_body: RetryFixRequest, request: Request, db: Session = Depends(get_db)) -> RetryFixResponse:
     """
     Analyze and fix a bug with automatic retry logic.
-    
-    This endpoint provides detailed information about all retry attempts:
-    - Attempts up to max_attempts times (default: 3, max: 5)
-    - Each attempt learns from previous failures
-    - Returns all attempts with their verification results
-    - Useful for debugging the AI's fix process
-    
-    Args:
-        request: Fix request with retry parameters
-        db: Database session
-        
-    Returns:
-        Detailed results including all attempts and final outcome
     """
     try:
         # Create bug report in database
         bug_report = crud.create_bug_report(
             db=db,
-            description=f"{request.error_message[:200]}..."
+            description=f"{request_body.error_message[:200]}..."
         )
         bug_id = f"BUG-{bug_report.id}"
         
+        # Get RAG instance from app state
+        rag = getattr(request.app.state, "rag", None)
+
         # Initialize agent and run retry logic
         agent = BugExorcistAgent(
             bug_id=bug_id, 
-            openai_api_key=request.openai_api_key,
-            project_path="." # Default to current dir if not specified in request model
+            openai_api_key=request_body.openai_api_key,
+            project_path=".", # Default to current dir if not specified in request model
+            rag=rag
         )
         result = await agent.analyze_and_fix_with_retry(
-            error_message=request.error_message,
-            code_snippet=request.code_snippet,
-            file_path=request.file_path,
-            additional_context=request.additional_context,
-            max_attempts=request.max_attempts,
-            language=request.language
+            error_message=request_body.error_message,
+            code_snippet=request_body.code_snippet,
+            file_path=request_body.file_path,
+            additional_context=request_body.additional_context,
+            max_attempts=request_body.max_attempts,
+            language=request_body.language
         )
         
         # Update database status
@@ -381,7 +387,7 @@ async def fix_bug_with_retry(request: RetryFixRequest, db: Session = Depends(get
         else:
             crud.update_bug_report_status(db=db, bug_report_id=bug_report.id, status="failed")
         
-        return RetryFixResponse(language=request.language, **result)
+        return RetryFixResponse(language=request_body.language, **result)
         
     except Exception as e:
         logger.exception(f"Retry fix failed for {bug_id if 'bug_id' in locals() else 'unknown'}")

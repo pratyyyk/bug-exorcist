@@ -29,3 +29,4 @@ class Session(Base):
     fixed_code = Column(Text, nullable=True)
     repo_path = Column(String, nullable=True)
     file_path = Column(String, nullable=True)
+    referenced_files = Column(Text, nullable=True) # JSON list of files used for RAG context

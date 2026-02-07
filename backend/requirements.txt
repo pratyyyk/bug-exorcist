@@ -23,6 +23,10 @@ sqlalchemy
 # Version Control
 GitPython
 
+# Vector Database & RAG
+chromadb
+langchain-community
+
 # Additional utilities
 python-dotenv
 PyYAML

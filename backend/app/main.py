@@ -21,6 +21,13 @@ def validate_paths(repo_path: Optional[str], file_path: Optional[str] = None, pr
     """
     try:
         allowed_root_env = os.getenv("ALLOWED_REPO_ROOT")
+        is_prod = os.getenv("ENVIRONMENT", "development").lower() == "production"
+
+        # Fail closed in production if ALLOWED_REPO_ROOT is not set
+        if is_prod and not allowed_root_env:
+            logger.error("SECURITY ALERT: ALLOWED_REPO_ROOT must be set in production environment.")
+            return False
+
         root_dir = Path(allowed_root_env).resolve() if allowed_root_env else None
 
         if repo_path:
@@ -130,6 +137,10 @@ def run_migrations():
             if "file_path" not in columns:
                 logger.info("Adding 'file_path' column to sessions table")
                 conn.execute(text("ALTER TABLE sessions ADD COLUMN file_path TEXT"))
+
+            if "referenced_files" not in columns:
+                logger.info("Adding 'referenced_files' column to sessions table")
+                conn.execute(text("ALTER TABLE sessions ADD COLUMN referenced_files TEXT"))
             
             conn.commit()
             logger.info("Database migrations completed successfully")
@@ -182,6 +193,51 @@ app.add_middleware(
 # Include routers
 app.include_router(logs_router, tags=["logs"])
 app.include_router(agent_router, tags=["agent"])
+
+# Initialize RAG background indexing
+@app.on_event("startup")
+async def startup_event():
+    try:
+        # Check if RAG is disabled
+        if os.getenv("ENABLE_RAG", "true").lower() == "false":
+            logger.info("RAG is disabled via ENABLE_RAG environment variable.")
+            return
+
+        from core.rag_engine import CodebaseRAG
+        project_path = os.getenv("ALLOWED_REPO_ROOT", ".")
+        
+        # In production, require project_path to be explicitly set if RAG is enabled
+        is_prod = os.getenv("ENVIRONMENT", "development").lower() == "production"
+        if is_prod and project_path == ".":
+             logger.warning("RAG: project_path defaults to '.' in production. Ensure ALLOWED_REPO_ROOT is set correctly.")
+
+        rag = CodebaseRAG(project_path=project_path)
+        # Initial indexing in background thread to not block startup
+        asyncio.create_task(asyncio.to_thread(rag.index_project))
+        # Start background indexing with 1-hour interval
+        rag.start_background_indexing(interval_seconds=3600)
+        app.state.rag = rag
+        logger.info("RAG singleton initialized and background indexing started.")
+    except Exception as e:
+        logger.error(f"Failed to initialize RAG during startup: {e}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Handle application shutdown and cleanup."""
+    logger.info("Application shutting down...")
+    
+    # Cancel RAG background indexing if it exists
+    if hasattr(app.state, "rag") and app.state.rag:
+        rag = app.state.rag
+        if rag.indexing_task:
+            logger.info("Cancelling RAG background indexing task...")
+            rag.indexing_task.cancel()
+            try:
+                await rag.indexing_task
+            except asyncio.CancelledError:
+                logger.info("RAG background indexing task successfully cancelled.")
+            except Exception as e:
+                logger.error(f"Error while cancelling RAG indexing task: {e}")
 
 
 # NEW: Real-Time Thought Stream WebSocket Endpoint
@@ -322,7 +378,8 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str) -> Non
             total_cost = 0.0
             
             # Initialize agent with streaming capability
-            agent = BugExorcistAgent(bug_id=bug_id, project_path=project_path)
+            rag = getattr(app.state, "rag", None)
+            agent = BugExorcistAgent(bug_id=bug_id, project_path=project_path, rag=rag)
             
             # Start thought stream
             last_result = None
@@ -333,13 +390,24 @@ async def thought_stream_websocket(websocket: WebSocket, session_id: str) -> Non
                 additional_context=additional_context,
                 use_retry=use_retry,
                 max_attempts=max_attempts,
-                language=language
+                language=language,
+                session_id=session_id
             ):
                 if event.get("type") == "result":
                     last_result = event.get("data")
+                    
+                    # Consolidate DB write for referenced files from the final result
+                    if last_result and last_result.get('referenced_files'):
+                        crud.update_session_referenced_files(db=db, session_id=session_id, files=last_result['referenced_files'])
+
                 # If this is a thought event with usage, accumulate it
                 if event.get("type") == "thought" and "usage" in event.get("data", {}):
                     usage = event["data"]["usage"]
+                    
+                    # Also check for referenced files in thought events (generated per attempt)
+                    if event["data"].get("referenced_files"):
+                        crud.update_session_referenced_files(db=db, session_id=session_id, files=event["data"]["referenced_files"])
+                    
                     total_prompt_tokens += usage.get("prompt_tokens", 0)
                     total_completion_tokens += usage.get("completion_tokens", 0)
                     total_cost += usage.get("estimated_cost", 0.0)
