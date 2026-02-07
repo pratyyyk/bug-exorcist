@@ -1,147 +1,218 @@
-# 🧟‍♂️ The Bug Exorcist 
-**An autonomous AI agent that exorcises bugs from your codebase while you sleep.**
+# Bug Exorcist
+Autonomous AI debugging that reproduces, fixes, and verifies runtime errors in a secure sandbox.
 
----
+## What This Project Does
+Bug Exorcist captures an error, reproduces it in a sandboxed container, asks an AI model to generate a fix, and verifies that the fix actually resolves the problem.
 
-## 📖 Project Overview
+## How It Works (End-to-End)
+1. Client sends error message, code snippet, and optional context.
+2. Agent analyzes the failure and proposes a fix.
+3. Fix is executed inside a Docker sandbox.
+4. Verification output determines pass or fail.
+5. Result, explanation, and usage data are returned.
 
-**Bug Exorcist** is an autonomous system designed to haunt down and eliminate runtime errors. It actively listens for bugs, traps them in an isolated **Docker container** (sandbox) to reproduce the issue, and summons **GPT-4o** to write a patch. The agent then verifies the fix by re-running the code and, if successful, automatically commits the solution.
+## Key Features
+* Sandbox execution with resource limits
+* AI-driven fix generation with retry logic
+* Verification loop with automatic fallback guidance
+* Optional RAG for codebase-aware fixes
+* REST API + WebSocket streaming for live progress
 
----
+## Architecture
+* **Frontend**: Next.js dashboard for sessions and thought stream
+* **Backend**: FastAPI REST + WebSocket endpoints
+* **Core**: Agent logic, providers, retry flow, parsing, verification
+* **Sandbox**: Dockerized execution with security restrictions
 
-### 🛠️ Tech Stack
-
-* **Frontend:** Next.js 14 (App Router), Tailwind CSS, Framer Motion
-* **Backend:** Python (FastAPI), LangChain
-* **Core Logic:** OpenAI GPT-4o + Docker SDK (Sandbox Management)
-* **RAG:** ChromaDB for codebase indexing and retrieval
-
----
-
-## 🔒 Privacy & Security (RAG)
-
-The Retrieval-Augmented Generation (RAG) system indexes your codebase to provide context to the AI agent. To protect your data, the following security features are implemented:
-
-* **Configurable RAG:** Disable RAG entirely by setting `ENABLE_RAG=false` in your `.env`.
-* **Path Validation:** In production (`ENVIRONMENT=production`), the system requires `ALLOWED_REPO_ROOT` to be set. It will fail to process any paths outside this root.
-* **Sensitive File Filtering:** The indexer automatically skips sensitive files (e.g., `*secret*`, `*key*`, `.env`, `.pem`, `.crt`, `.db`).
-* **Local Embeddings:** You can use local embeddings instead of OpenAI by setting `RAG_EMBEDDING_PROVIDER=huggingface`. This prevents code snippets from being sent to OpenAI for embedding.
-* **Data Retention:** The vector database is automatically cleared if it's older than 30 days (configurable via `RAG_RETENTION_DAYS`).
-
----
-
-## 📂 Project Structure
-
-We follow a modular monorepo structure. Please ensure your contributions are placed in the correct directories.
-
-```text
-├── frontend/                # Next.js 14 Application (User Dashboard)
-│   ├── app/                 # App Router pages and layouts
-│   ├── components/          # Reusable UI components
-│   └── public/              # Static assets
-│
-├── backend/                 # FastAPI Server
-│   ├── app/
-│   │   ├── main.py          # Entry point
-│   │   └── api/             # API routes
-│   └── requirements.txt     # Python dependencies
-│
-├── core/                    # Autonomous Agent Logic
-│   ├── agent.py             # LangChain & GPT-4o integration
-│   └── sandbox/             # Docker SDK scripts for container management
-│
-├── docker-compose.yml       # Container orchestration
-└── README.md                # Project Documentation
-```
-
----
-
-## ❄️ About AcWoC '26
-This project is a featured repository in AcWoC (Android Club Winter of Code) 2026, an open-source initiative organized by the Android Club at VIT Bhopal.
-
-Organizers: Android Club, VIT Bhopal
-
----
-
-## 🤝 Contribution Guidelines
-We welcome contributions from participants! To ensure a fair and organized workflow, please adhere strictly to the following rules.
-
-### Issue Assignment & Fairness Policy
-
-* First-Come, First-Served: Issues are assigned to the first contributor who comments asking for them.
-
-* Wait for Assignment: Do not start working on an issue until a maintainer has explicitly assigned it to you.
-
-* One Issue at a Time: You may only work on one assigned issue at a time.
-
-### Pull Request (PR) Rules
-
-* Link Your Issue: Every PR must be linked to the issue it solves (e.g., Closes #12).
-
-* Descriptive Titles: Use clear titles like feat: Add dashboard sidebar or fix: Docker container timeout.
-
-* Labeling: Maintainers will verify your PR and add the acwoc label along with a difficulty label (easy, medium, hard) to award points.
-
-### Reporting Issues
-
-* If you find a bug or have a feature idea, please open an issue and tag the maintainers.
-
----
-
-## 🚀 Getting Started
-
-### Prerequisites
-
-* Node.js & npm
-
+## Requirements
+* Node.js 18+
 * Python 3.10+
-
 * Docker Desktop
 
-### Environment Variables
+## Project Structure
+```
+backend/   FastAPI server, database, sandbox
+core/      AI agent logic
+frontend/  Next.js app
+tests/     Python tests
+```
 
-Set these in `.env` (see `.env.example`) or your shell:
+## Quick Start (Local)
 
-* `OPENAI_API_KEY` (required for GPT-4o)
-* `GEMINI_API_KEY` (optional fallback provider)
-* `ENABLE_RAG` (`true`/`false`) to enable codebase indexing
-* `ALLOWED_REPO_ROOT` (required in production when RAG is enabled)
-* `RAG_EMBEDDING_PROVIDER` (`openai` or `huggingface`)
-* `RAG_RETENTION_DAYS` (default: `30`)
-* `ENABLE_FALLBACK` (`true`/`false`) to enable manual guidance fallback
-* `ENABLE_GEMINI_FALLBACK` (`true`/`false`) to enable Gemini fallback
-
-### Installation
-
-1. Clone the Repository
+### 1. Clone
 ```bash
 git clone https://github.com/your-username/bug-exorcist.git
 cd bug-exorcist
 ```
 
-2. Setup Backend
+### 2. Configure Environment
+```bash
+cp .env.example .env
+```
+
+### 3. Backend
 ```bash
 cd backend
 python -m pip install -r requirements.txt
 python -m uvicorn app.main:app --reload
 ```
 
-3. Setup Frontend
-```
+### 4. Frontend
+```bash
 cd frontend
-npm install
+npm ci
 npm run dev
 ```
-4. Run with Docker
+
+### 5. Full Stack (Docker)
 ```bash
-# This builds the backend, frontend, and the sandbox image
 docker-compose up --build
 ```
 
----
+## Configuration
+Set these in `.env` or your shell.
 
-## 📬 Contact Maintainers
+| Variable | Description | Required |
+| --- | --- | --- |
+| `OPENAI_API_KEY` | OpenAI API key for GPT-4o | Yes |
+| `GEMINI_API_KEY` | Gemini API key for fallback | No |
+| `ENABLE_RAG` | Enable RAG context retrieval | No |
+| `ALLOWED_REPO_ROOT` | Allowed repo root for RAG in prod | Prod only |
+| `RAG_EMBEDDING_PROVIDER` | `openai` or `huggingface` | No |
+| `RAG_RETENTION_DAYS` | Auto-clear vector DB | No |
+| `ENABLE_FALLBACK` | Manual fallback guidance | No |
+| `ENABLE_GEMINI_FALLBACK` | Gemini fallback toggle | No |
+| `ALLOW_MOCK_LLM` | Use mock LLM for tests/CI | No |
 
-For questions regarding the project or AcWoC participation, please reach out via the AcWoC Discord Server.
+## API Reference
 
----
+### Analyze and Fix
+`POST /api/agent/analyze`
+
+Example:
+```bash
+curl -X POST http://localhost:8000/api/agent/analyze \
+  -H "Content-Type: application/json" \
+  -d '{
+    "error_message": "ZeroDivisionError: division by zero",
+    "code_snippet": "def divide(a,b): return a/b",
+    "language": "python",
+    "use_retry": true,
+    "max_attempts": 3
+  }'
+```
+
+### Retry Workflow Only
+`POST /api/agent/fix-with-retry`
+
+### Quick Fix
+`POST /api/agent/quick-fix`
+
+### Verify Fix
+`POST /api/agent/verify`
+
+### Health Checks
+* `GET /api/agent/health`
+* `GET /health`
+
+## WebSocket Endpoints
+* `/ws/logs/{bug_id}` for streaming logs
+* `/ws/thought-stream/{session_id}` for real-time thought stream
+
+## Sandbox Behavior
+* Runs code in isolated containers
+* Limits CPU and memory
+* Blocks external network access by default
+* Supports Python, JS, Go, Rust, Bash, and test runners
+
+## RAG Notes
+* Uses ChromaDB for vector search
+* Skips sensitive files (`*.env`, `*secret*`, `*.pem`, `*.db`)
+* Auto-clears old embeddings using `RAG_RETENTION_DAYS`
+
+## Testing
+```bash
+python -m pytest
+```
+
+Frontend checks:
+```bash
+cd frontend
+npm run lint
+npm run build
+```
+
+## CI
+CI runs backend tests and frontend lint/build. It uses mock LLMs in CI to avoid API key requirements.
+
+## Troubleshooting
+* Missing Docker: install Docker Desktop and verify `docker --version`
+* Port conflicts: change ports or stop the conflicting service
+* No API key: set `OPENAI_API_KEY` or enable `ALLOW_MOCK_LLM=true`
+
+## Screenshots
+Place images in `frontend/public/` and reference them here:
+
+![Dashboard](frontend/public/screenshot-dashboard.svg)
+![Thought Stream](frontend/public/screenshot-thought-stream.svg)
+![History](frontend/public/screenshot-history.svg)
+![Settings](frontend/public/screenshot-settings.svg)
+
+## Demo GIFs
+Place GIFs in `frontend/public/` and reference them here:
+
+![Demo](frontend/public/demo.gif)
+
+## Deployment Guide
+
+### Option 1: Docker Compose (Recommended)
+```bash
+docker-compose up --build
+```
+
+### Option 2: Manual Deployment
+Backend:
+```bash
+cd backend
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+```
+
+Frontend:
+```bash
+cd frontend
+npm ci
+npm run build
+npm run start -- --port 3000
+```
+
+### Production Notes
+* Set `ENVIRONMENT=production`
+* Set `ALLOWED_REPO_ROOT` if RAG is enabled
+* Configure secrets using your platform’s secret manager
+* Put the backend behind HTTPS and a reverse proxy
+
+## FAQ
+
+**Q: Can I run this without an API key?**  
+A: Yes. Set `ALLOW_MOCK_LLM=true` for local testing and CI.
+
+**Q: Is the sandbox secure?**  
+A: The sandbox runs in Docker with resource limits and restricted networking. Do not run untrusted code without reviewing your settings.
+
+**Q: Why does RAG skip some files?**  
+A: Sensitive patterns (`*.env`, `*secret*`, `*.db`) are intentionally excluded to reduce risk.
+
+**Q: How do I add support for a new language?**  
+A: Update the language allowlist and sandbox command map, then add tests.
+
+## Contributing
+Read `CONTRIBUTING.md` for setup and workflow.
+
+Quick rules:
+* Open an issue before non-trivial work
+* Keep PRs focused and link the issue
+* Include tests or clear verification steps
+
+## Security
+See `SECURITY.md` for reporting vulnerabilities.
