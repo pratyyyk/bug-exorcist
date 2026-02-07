@@ -12,7 +12,6 @@ langchain-google-genai==2.1.12
 langchain-ollama==0.3.10  # Local LLM support
 openai==2.17.0
 tiktoken==0.12.0
-google-generativeai==0.8.6
 
 # Sandbox Management (Docker SDK)
 docker==7.1.0
