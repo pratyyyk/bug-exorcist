@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import ContextMap from './ContextMap';
 
 interface ThoughtEvent {
@@ -57,8 +57,22 @@ export default function TerminalViewer({
         }
     }, [thoughts]);
 
+    const addThought = useCallback((thought: ThoughtEvent) => {
+        setThoughts(prev => [...prev, thought]);
+    }, []);
+
+    const disconnectWebSocket = useCallback(() => {
+        if (wsRef.current) {
+            wsRef.current.close();
+            wsRef.current = null;
+        }
+        if (reconnectTimeoutRef.current) {
+            clearTimeout(reconnectTimeoutRef.current);
+        }
+    }, []);
+
     // WebSocket connection management
-    const connectWebSocket = () => {
+    const connectWebSocket = useCallback(() => {
         if (wsRef.current?.readyState === WebSocket.OPEN) {
             return; // Already connected
         }
@@ -200,21 +214,7 @@ export default function TerminalViewer({
         };
 
         wsRef.current = ws;
-    };
-
-    const addThought = (thought: ThoughtEvent) => {
-        setThoughts(prev => [...prev, thought]);
-    };
-
-    const disconnectWebSocket = () => {
-        if (wsRef.current) {
-            wsRef.current.close();
-            wsRef.current = null;
-        }
-        if (reconnectTimeoutRef.current) {
-            clearTimeout(reconnectTimeoutRef.current);
-        }
-    };
+    }, [addThought, onAnalysisRequest, sessionId]);
 
     useEffect(() => {
         if (autoConnect) {
@@ -224,7 +224,7 @@ export default function TerminalViewer({
         return () => {
             disconnectWebSocket();
         };
-    }, [sessionId, autoConnect]);
+    }, [autoConnect, connectWebSocket, disconnectWebSocket]);
 
     const getThoughtIcon = (thought: ThoughtEvent) => {
         switch (thought.type) {
@@ -380,7 +380,7 @@ export default function TerminalViewer({
                         <div className="flex flex-col items-center justify-center h-full text-[#38ff14]/30">
                             <span className="material-symbols-outlined text-6xl mb-4">power_off</span>
                             <p className="text-sm uppercase tracking-widest">Thought stream not connected</p>
-                            <p className="text-[10px] mt-2">Click "Connect" to start streaming</p>
+                            <p className="text-[10px] mt-2">Click &quot;Connect&quot; to start streaming</p>
                         </div>
                     )}
 
