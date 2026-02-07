@@ -6,7 +6,7 @@ websockets==15.0.1  # Required for WebSocket support
 
 # AI & LLM - LangChain stack
 langchain==0.3.27
-langchain-openai==0.3.35
+langchain-openai==1.1.7
 langchain-core==0.3.83
 langchain-google-genai==2.1.12
 langchain-ollama==0.3.10  # Local LLM support
