@@ -10,6 +10,26 @@ sys.path.append(os.path.join(project_root, 'backend'))
 
 from app.api.agent import BugAnalysisRequest, BugAnalysisResponse, VerifyFixRequest, QuickFixRequest
 from app.api.agent import analyze_bug, verify_bug_fix, quick_fix_endpoint, fix_bug_with_retry, RetryFixRequest
+from fastapi import FastAPI
+from starlette.requests import Request
+
+
+def make_request() -> Request:
+    app = FastAPI()
+    scope = {
+        "type": "http",
+        "http_version": "1.1",
+        "method": "POST",
+        "path": "/",
+        "raw_path": b"/",
+        "headers": [],
+        "query_string": b"",
+        "scheme": "http",
+        "server": ("testserver", 80),
+        "client": ("testclient", 123),
+        "app": app,
+    }
+    return Request(scope)
 
 async def test_rest_api_language_support():
     """
@@ -52,7 +72,7 @@ async def test_rest_api_language_support():
                 use_retry=True
             )
             
-            response = await analyze_bug(request, db=mock_db)
+            response = await analyze_bug(request, request=make_request(), db=mock_db)
             
             # Verify language was forwarded to agent
             args, kwargs = mock_agent_instance.analyze_and_fix_with_retry.call_args
@@ -83,7 +103,7 @@ async def test_rest_api_language_support():
                 max_attempts=3
             )
             
-            response = await fix_bug_with_retry(request, db=mock_db)
+            response = await fix_bug_with_retry(request, request=make_request(), db=mock_db)
             
             # Verify language was forwarded
             args, kwargs = mock_agent_instance.analyze_and_fix_with_retry.call_args
