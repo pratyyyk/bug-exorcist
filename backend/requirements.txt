@@ -1,6 +1,6 @@
 # Web Server (FastAPI)
 fastapi==0.128.4
-uvicorn[standard]==0.39.0
+uvicorn[standard]==0.40.0
 pydantic==2.12.5
 websockets==15.0.1  # Required for WebSocket support
 
