@@ -15,7 +15,7 @@ def test_parser_with_inline_content():
     print("\n--- Testing Parser with Inline Content ---")
     
     # Mock Sandbox to avoid Docker connection
-    with patch('app.sandbox.Sandbox'):
+    with patch.dict(os.environ, {"ALLOW_MOCK_LLM": "true"}), patch('app.sandbox.Sandbox'):
         # Mock agent for testing
         agent = BugExorcistAgent(bug_id="test-parser")
         
@@ -49,7 +49,7 @@ print(x)
 def test_parser_with_code_fence_inline():
     print("\n--- Testing Parser with Code Fence Inline ---")
     
-    with patch('app.sandbox.Sandbox'):
+    with patch.dict(os.environ, {"ALLOW_MOCK_LLM": "true"}), patch('app.sandbox.Sandbox'):
         agent = BugExorcistAgent(bug_id="test-parser")
         
         ai_response = """
@@ -73,7 +73,7 @@ print("line 2")```
 def test_parser_with_fixed_code_header_inline():
     print("\n--- Testing Parser with Fixed Code Header Inline ---")
 
-    with patch('app.sandbox.Sandbox'):
+    with patch.dict(os.environ, {"ALLOW_MOCK_LLM": "true"}), patch('app.sandbox.Sandbox'):
         agent = BugExorcistAgent(bug_id="test-parser")
 
         ai_response = """
@@ -100,7 +100,7 @@ Explanation: Replaced with correct value.
 def test_parser_with_python3_inline_fence():
     print("\n--- Testing Parser with python3 Inline Fence ---")
 
-    with patch('app.sandbox.Sandbox'):
+    with patch.dict(os.environ, {"ALLOW_MOCK_LLM": "true"}), patch('app.sandbox.Sandbox'):
         agent = BugExorcistAgent(bug_id="test-parser")
 
         ai_response = """

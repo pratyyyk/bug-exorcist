@@ -19,7 +19,8 @@ async def test_ollama_retry_logic():
     with patch.dict(os.environ, {
         "PRIMARY_AGENT": "ollama",
         "OLLAMA_MODEL": "llama3",
-        "OLLAMA_BASE_URL": "http://localhost:11434"
+        "OLLAMA_BASE_URL": "http://localhost:11434",
+        "ALLOW_MOCK_LLM": "true"
     }):
         # Mock Sandbox class to avoid Docker initialization errors
         with patch('app.sandbox.Sandbox') as MockSandbox:
