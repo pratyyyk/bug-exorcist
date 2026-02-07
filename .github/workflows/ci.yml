@@ -13,6 +13,10 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      ALLOW_MOCK_LLM: "true"
+      ALLOW_MOCK_SANDBOX_VERIFICATION: "true"
+      ENABLE_RAG: "false"
 
     steps:
     - uses: actions/checkout@v4
