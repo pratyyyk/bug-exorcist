@@ -17,6 +17,8 @@ class TestLanguageAllowlist(unittest.TestCase):
         self.assertEqual(sanitize_language("golang"), "go")
         self.assertEqual(sanitize_language("shell"), "bash")
         self.assertEqual(sanitize_language("run-npm-tests"), "npm-test")
+        self.assertEqual(sanitize_language("go test"), "go-test")
+        self.assertEqual(sanitize_language("go_test"), "go-test")
 
     def test_sanitization(self):
         # Injection attempts

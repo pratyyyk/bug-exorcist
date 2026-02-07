@@ -30,3 +30,4 @@ langchain-community
 # Additional utilities
 python-dotenv
 PyYAML
+requests

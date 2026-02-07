@@ -22,8 +22,8 @@ class TestSandboxLanguages(unittest.TestCase):
         """Verify that all requested languages map to the correct shell commands."""
         test_cases = [
             ("python", ["/bin/sh", "-c", "python3 -c \"import sys; exec(sys.stdin.read())\""]),
-            ("javascript", ["/bin/sh", "-c", "node -e \"$(cat)\""]),
-            ("nodejs", ["/bin/sh", "-c", "node -e \"$(cat)\""]),
+            ("javascript", ["/bin/sh", "-c", "node -"]),
+            ("nodejs", ["/bin/sh", "-c", "node -"]),
             ("go", ["/bin/sh", "-c", "cat > main.go && go run main.go"]),
             ("go-test", ["/bin/sh", "-c", "cat > main_test.go && go test -v"]),
             ("rust", ["/bin/sh", "-c", "cat > main.rs && rustc main.rs -o main && ./main"]),

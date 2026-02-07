@@ -21,7 +21,7 @@ Before you begin, ensure you have the following installed:
 
 1. **Python 3.10+**
    - Download from [python.org](https://www.python.org/downloads/)
-   - Verify installation: `python --version`
+   - Verify installation: `python3 --version`
 
 2. **Node.js & npm**
    - Download from [nodejs.org](https://nodejs.org/) (v18+ recommended)
@@ -107,7 +107,7 @@ venv\Scripts\activate
 source venv/bin/activate
 
 # Install dependencies
-pip install -r requirements.txt
+python -m pip install -r requirements.txt
 
 # Verify installation
 python -c "import fastapi, openai, docker; print('Backend dependencies installed successfully')"
@@ -141,7 +141,7 @@ You have two options to run the project:
 ```bash
 # Terminal 1: Start Backend
 cd backend
-python app/main.py
+python -m uvicorn app.main:app --reload
 # Backend will be available at http://localhost:8000
 
 # Terminal 2: Start Frontend
@@ -343,7 +343,7 @@ npm run test:coverage
 
 # If port conflicts occur
 # Check what's using the port:
-netstat -tulpn | grep :8000  # Linux/macOS
+lsof -i :8000  # macOS/Linux
 netstat -ano | findstr :8000 # Windows
 ```
 
@@ -351,7 +351,7 @@ netstat -ano | findstr :8000 # Windows
 ```bash
 # If pip install fails
 python -m pip install --upgrade pip
-pip install -r requirements.txt --no-cache-dir
+python -m pip install -r requirements.txt --no-cache-dir
 
 # If import errors occur
 # Ensure virtual environment is activated

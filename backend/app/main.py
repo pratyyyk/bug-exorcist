@@ -90,14 +90,14 @@ def sanitize_language(lang: str) -> str:
     if clean_lang in SUPPORTED_LANGUAGES:
         return clean_lang
     
-    # Specific mappings for common variations
+    # Specific mappings for common variations (test variants first)
+    if "cargo" in clean_lang and "test" in clean_lang: return "cargo-test"
+    if "npm" in clean_lang and "test" in clean_lang: return "npm-test"
+    if "go" in clean_lang and "test" in clean_lang: return "go-test"
     if clean_lang in ["js", "javascript"] or "javascript" in clean_lang: return "javascript"
     if clean_lang in ["node", "nodejs"] or "node" in clean_lang: return "nodejs"
     if clean_lang in ["golang", "go"] or "go" in clean_lang: return "go"
     if clean_lang in ["sh", "bash", "shell"] or "bash" in clean_lang: return "bash"
-    if "npm" in clean_lang and "test" in clean_lang: return "npm-test"
-    if "go" in clean_lang and "test" in clean_lang: return "go-test"
-    if "cargo" in clean_lang and "test" in clean_lang: return "cargo-test"
     
     # Default to python if unknown or potentially dangerous
     return "python"

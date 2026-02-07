@@ -283,8 +283,8 @@ print(f"DISK_FREE:{usage.free // (2**20)}MB")
             # Map language to execution command
             commands = {
                 "python": ["/bin/sh", "-c", "python3 -c \"import sys; exec(sys.stdin.read())\""],
-                "javascript": ["/bin/sh", "-c", "node -e \"$(cat)\""],
-                "nodejs": ["/bin/sh", "-c", "node -e \"$(cat)\""],
+                "javascript": ["/bin/sh", "-c", "node -"],
+                "nodejs": ["/bin/sh", "-c", "node -"],
                 "go": ["/bin/sh", "-c", "cat > main.go && go run main.go"],
                 "go-test": ["/bin/sh", "-c", "cat > main_test.go && go test -v"],
                 "rust": ["/bin/sh", "-c", "cat > main.rs && rustc main.rs -o main && ./main"],

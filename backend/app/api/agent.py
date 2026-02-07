@@ -191,7 +191,11 @@ def get_db() -> Generator[Session, None, None]:
 
 
 @router.post("/analyze", response_model=BugAnalysisResponse)
-async def analyze_bug(request_body: BugAnalysisRequest, request: Request, db: Session = Depends(get_db)) -> BugAnalysisResponse:
+async def analyze_bug(
+    request_body: BugAnalysisRequest,
+    request: Optional[Request] = None,
+    db: Session = Depends(get_db),
+) -> BugAnalysisResponse:
     """
     Analyze a bug and generate a fix using the configured AI agent.
     """
@@ -209,7 +213,7 @@ async def analyze_bug(request_body: BugAnalysisRequest, request: Request, db: Se
         crud.create_session(db=db, session_id=session_id, bug_report_id=bug_report.id)
         
         # Get RAG instance from app state
-        rag = getattr(request.app.state, "rag", None)
+        rag = getattr(request.app.state, "rag", None) if request else None
 
         # Initialize agent
         agent = BugExorcistAgent(
@@ -350,7 +354,11 @@ async def analyze_bug(request_body: BugAnalysisRequest, request: Request, db: Se
 
 
 @router.post("/fix-with-retry", response_model=RetryFixResponse)
-async def fix_bug_with_retry(request_body: RetryFixRequest, request: Request, db: Session = Depends(get_db)) -> RetryFixResponse:
+async def fix_bug_with_retry(
+    request_body: RetryFixRequest,
+    request: Optional[Request] = None,
+    db: Session = Depends(get_db),
+) -> RetryFixResponse:
     """
     Analyze and fix a bug with automatic retry logic.
     """
@@ -363,7 +371,7 @@ async def fix_bug_with_retry(request_body: RetryFixRequest, request: Request, db
         bug_id = f"BUG-{bug_report.id}"
         
         # Get RAG instance from app state
-        rag = getattr(request.app.state, "rag", None)
+        rag = getattr(request.app.state, "rag", None) if request else None
 
         # Initialize agent and run retry logic
         agent = BugExorcistAgent(

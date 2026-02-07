@@ -81,7 +81,6 @@ We welcome contributions from participants! To ensure a fair and organized workf
 * Descriptive Titles: Use clear titles like feat: Add dashboard sidebar or fix: Docker container timeout.
 
 * Labeling: Maintainers will verify your PR and add the acwoc label along with a difficulty label (easy, medium, hard) to award points.
-+1
 
 ### Reporting Issues
 
@@ -102,16 +101,16 @@ We welcome contributions from participants! To ensure a fair and organized workf
 ### Installation
 
 1. Clone the Repository
-```
-git clone [https://github.com/your-username/bug-exorcist.git](https://github.com/your-username/bug-exorcist.git)
+```bash
+git clone https://github.com/your-username/bug-exorcist.git
 cd bug-exorcist
 ```
 
 2. Setup Backend
-```
+```bash
 cd backend
-pip install -r requirements.txt
-python app/main.py
+python -m pip install -r requirements.txt
+python -m uvicorn app.main:app --reload
 ```
 
 3. Setup Frontend

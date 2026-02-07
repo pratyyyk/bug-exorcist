@@ -24,6 +24,33 @@ from core.gemini_agent import GeminiFallbackAgent, is_gemini_available
 from core.ollama_provider import get_ollama_llm, is_ollama_available
 
 
+def _sanitize_language(lang: Optional[str]) -> str:
+    try:
+        from app.main import sanitize_language as backend_sanitize_language
+        return backend_sanitize_language(lang)
+    except Exception:
+        if not lang or not isinstance(lang, str):
+            return "python"
+        clean_lang = re.sub(r'[^a-zA-Z0-9\-]', '', lang.lower().strip())
+        if clean_lang in ["python", "javascript", "nodejs", "go", "rust", "bash", "go-test", "cargo-test", "npm-test"]:
+            return clean_lang
+        if "cargo" in clean_lang and "test" in clean_lang:
+            return "cargo-test"
+        if "npm" in clean_lang and "test" in clean_lang:
+            return "npm-test"
+        if "go" in clean_lang and "test" in clean_lang:
+            return "go-test"
+        if clean_lang in ["js", "javascript"] or "javascript" in clean_lang:
+            return "javascript"
+        if clean_lang in ["node", "nodejs"] or "node" in clean_lang:
+            return "nodejs"
+        if clean_lang in ["golang", "go"] or "go" in clean_lang:
+            return "go"
+        if clean_lang in ["sh", "bash", "shell"] or "bash" in clean_lang:
+            return "bash"
+        return "python"
+
+
 class MockLLM:
     def __init__(self, model_name="mock-ai"):
         self.model_name = model_name
@@ -713,6 +740,7 @@ Be systematic, thorough, and learn from failures."""
         """
         Analyze an error and generate a fix using AI.
         """
+        language = _sanitize_language(language)
         # Determine which provider to use
         provider = self.secondary_provider if use_secondary else self.primary_provider
         
@@ -901,7 +929,7 @@ Please provide:
         explanation_lines = []
         retry_analysis_lines = []
         
-        # States: None, 'root_cause', 'code', 'explanation', 'retry_analysis'
+        # States: None, 'root_cause', 'code', 'fixed_code', 'explanation', 'retry_analysis'
         current_state = None
         
         for line in lines:
@@ -913,18 +941,18 @@ Please provide:
                 if current_state != 'code':
                     current_state = 'code'
                     # Check for inline code after the fence: ```python print("hello")
-                    fence_content = stripped_line.split('```', 1)[1]
+                    fence_content = stripped_line.split('```', 1)[1].strip()
                     # Remove language identifier if present
-                    if fence_content.startswith('python'):
-                        fence_content = fence_content[6:].strip()
-                    else:
-                        # Common case: ```python\ncode...
-                        # If there's content after the language ID on the same line, keep it
+                    if fence_content:
+                        language_tags = {
+                            "python", "python3", "py", "javascript", "js", "node", "nodejs",
+                            "typescript", "ts", "go", "golang", "rust", "bash", "sh", "shell"
+                        }
                         parts = fence_content.split(None, 1)
-                        if len(parts) > 1:
-                            fence_content = parts[1].strip()
-                        else:
+                        if len(parts) == 1 and parts[0].lower() in language_tags:
                             fence_content = ""
+                        elif len(parts) == 2 and parts[0].lower() in language_tags:
+                            fence_content = parts[1].strip()
                     
                     if fence_content:
                         fixed_code_lines.append(fence_content)
@@ -943,6 +971,10 @@ Please provide:
                 current_state = 'root_cause'
                 header_found = True
                 content = stripped_line.split(':', 1)[1].strip() if ':' in stripped_line else ""
+            elif 'fixed code' in lower_line:
+                current_state = 'fixed_code'
+                header_found = True
+                content = stripped_line.split(':', 1)[1].strip() if ':' in stripped_line else ""
             elif 'explanation' in lower_line or 'changes' in lower_line:
                 current_state = 'explanation'
                 header_found = True
@@ -956,6 +988,8 @@ Please provide:
                 if content:
                     if current_state == 'root_cause':
                         root_cause_lines.append(content)
+                    elif current_state == 'fixed_code':
+                        fixed_code_lines.append(content)
                     elif current_state == 'explanation':
                         explanation_lines.append(content)
                     elif current_state == 'retry_analysis':
@@ -966,6 +1000,8 @@ Please provide:
             if current_state == 'root_cause':
                 root_cause_lines.append(line)
             elif current_state == 'code':
+                fixed_code_lines.append(line)
+            elif current_state == 'fixed_code':
                 fixed_code_lines.append(line)
             elif current_state == 'explanation':
                 explanation_lines.append(line)
@@ -999,6 +1035,7 @@ Please provide:
         language: str = "python"
     ) -> Dict[str, Any]:
         """Verify the fix in the sandbox."""
+        language = _sanitize_language(language)
         # Real verification logic with robust exception handling
         try:
             # Use the existing sandbox instance
